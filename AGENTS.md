@@ -22,6 +22,7 @@
 - `Jenkinsfile` and `JENKINS_SETUP.md` own this fork's self-hosted Jenkins CI/CD: install/lint/build on every push, plus an approval-gated Docker Hub push (via `scripts/push-agent-zero.sh`) on the dedicated `production` branch. This is independent of `.github/workflows/docker-publish.yml`, which publishes upstream's own branch/tag scheme to the `agent0ai` Docker Hub org.
 - `Makefile` and `docker-compose.local.yml` own the local Docker lifecycle (`up`/`down`/`clean`/`logs`/`dev`) and the `make push`/`make push-check` wrappers around `scripts/push-agent-zero.sh`.
 - `ruff.toml` owns Python lint rule selection; see its comments for why several pyflakes codes are deliberately ignored (pre-existing debt, not a weaker standard going forward).
+- `casaos-agent-zero.yml` is a CasaOS App Store manifest for `asiqurrahman/agent-zero:production` -- the image `scripts/push-agent-zero.sh` (`make push`) and the Jenkins production pipeline publish. Not yet verified against a real CasaOS instance.
 - Runtime or user state under `usr/` and `tmp/` is intentionally outside tracked DOX unless the user explicitly asks otherwise.
 
 ## Project-Wide Contracts

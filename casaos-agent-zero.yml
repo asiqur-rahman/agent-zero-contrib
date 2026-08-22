@@ -1,0 +1,110 @@
+name: agent-zero
+services:
+  agent-zero:
+    cpu_shares: 90
+    command: []
+    container_name: agent-zero
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+    environment:
+      - TZ=Asia/Dhaka
+    hostname: agent-zero
+    image: asiqurrahman/agent-zero:production
+    labels:
+      icon: https://raw.githubusercontent.com/asiqur-rahman/agent-zero-contrib/production/webui/public/icon.svg
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /DATA/AppData/agent-zero/usr
+        target: /a0/usr
+        bind:
+          create_host_path: true
+    ports:
+      - target: 80
+        published: "50080"
+        protocol: tcp
+    devices: []
+    cap_add: []
+    networks:
+      - agent-zero-network
+    privileged: false
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1:80/api/health
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+    x-casaos:
+      envs:
+        - container: TZ
+          description:
+            en_US: Timezone
+      volumes:
+        - container: /a0/usr
+          description:
+            en_US: Settings, chats, memory, secrets, and custom plugins
+      ports:
+        - container: "80"
+          description:
+            en_US: Web UI, API, and WebSocket entry point
+      networks:
+        - container: agent-zero-network
+          description:
+            en_US: Isolated Agent Zero bridge network
+
+networks:
+  agent-zero-network:
+    name: agent-zero-network
+    driver: bridge
+
+x-casaos:
+  architectures:
+    - amd64
+  author: Md. Asiqur Rahman Khan
+  category: Developer Tools
+  description:
+    en_US: Self-hosted autonomous AI agent framework. Chat with an agent that
+      writes and executes code, browses the web, manages files, and calls
+      tools inside its own sandboxed Docker environment, all through one web
+      dashboard.
+  developer: asiqur-rahman
+  hostname: ""
+  icon: https://raw.githubusercontent.com/asiqur-rahman/agent-zero-contrib/production/webui/public/icon.svg
+  id: com.asiqurrahman.agent-zero
+  index: /
+  is_uncontrolled: false
+  main: agent-zero
+  port_map: "50080"
+  scheme: http
+  store_app_id: agent-zero
+  tagline:
+    en_US: Self-hosted autonomous AI agent
+  thumbnail: ""
+  title:
+    custom: ""
+    en_US: Agent Zero
+  networks:
+    - container: agent-zero-network
+      description:
+        en_US: Isolated bridge network for the Agent Zero container
+  tips:
+    before_install:
+      en_US: This is a personal fork's build (asiqurrahman/agent-zero), not the
+        official agent0ai/agent-zero image. Everything -- LLM provider, API
+        keys, agent profiles -- is configured from the web UI after first
+        launch; no credentials are baked into the image. Back up the mounted
+        /a0/usr volume -- it holds settings, chat history, memory, and custom
+        plugins. SSH access (port 22, used for Remote Function Calls between
+        a dev machine and the container) and the 9000-9009 auxiliary port
+        range are intentionally not published here; add them yourself via a
+        custom compose edit if you need them. The :production tag always
+        points at the latest build the Jenkins pipeline (or make push)
+        published -- pull again and recreate the container to update, no
+        manifest edit needed. Pin a specific :vX.Y tag instead if you want to
+        roll back to a known-good build.
