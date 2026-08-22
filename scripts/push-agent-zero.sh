@@ -79,7 +79,7 @@ is_version() {
 suggest_next() {
   local last="$1" major minor
   if [ -z "$last" ]; then
-    last="$(git tag -l 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+    last="$(git tag -l 'v*' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
     if [ -z "$last" ]; then
       printf 'v0.1'
       return 0
