@@ -6,15 +6,15 @@ This repo's `Jenkinsfile` assumes a Jenkins instance already running on your VPS
 
 The machine running the Jenkins agent (built-in node is fine for a single VPS) needs:
 
-- **Docker CLI + buildx**, with the Jenkins user able to reach the Docker daemon (either Jenkins runs directly on the VPS with its user in the `docker` group, or Jenkins itself runs in a container with the host's Docker socket mounted in). Every stage in the pipeline needs this -- Install/Lint/Build run inside per-stage `python:3.12-slim` containers via the Docker Pipeline plugin, not a Jenkins "Python tool" installation (there isn't a first-party equivalent of the NodeJS tool plugin for Python), and the final push obviously needs it too.
+- **Docker CLI + buildx**, with the Jenkins user able to reach the Docker daemon (either Jenkins runs directly on the VPS with its user in the `docker` group, or Jenkins itself runs in a container with the host's Docker socket mounted in). Every stage in the pipeline needs this -- Install/Lint/Build run Python inside a throwaway `python:3.12-slim` container via plain `sh 'docker run ...'` (not a Jenkins "Python tool" installation -- there isn't a first-party equivalent of the NodeJS tool plugin for Python -- and not the Docker Pipeline plugin's declarative `agent { docker {...} }`, which this Jenkins doesn't have installed), and the final push obviously needs it too.
 - Enough free disk for the Docker Hub push build: the image built from `DockerfileLocal` is large (~11GB on disk from `agent0ai/agent-zero-base`). This only runs on the gated `production` push, not on every branch push -- the per-push Install/Lint/Build stages stay light (pip install + ruff + `compileall`, no image build) specifically to keep routine CI cheap.
 
 ## 2. Jenkins plugins
 
 - **Pipeline** (ships by default with most Jenkins installs)
-- **Docker Pipeline** -- for the `agent { docker { image '...' } }` blocks used by Install/Lint/Build
 - **Git** / **GitHub Branch Source** -- needed for the Multibranch Pipeline job type below
 - **Credentials Binding** -- for `withCredentials`, used in the push stage
+- No **Docker Pipeline** plugin needed -- deliberately avoided since it wasn't already installed; Install/Lint/Build call `docker run` directly instead of using a declarative `agent { docker {...} }` block.
 
 ## 3. Docker Hub credential
 

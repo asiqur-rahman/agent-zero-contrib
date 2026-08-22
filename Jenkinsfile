@@ -14,10 +14,12 @@
 //
 // Requires on the Jenkins agent:
 //   - Docker CLI + buildx, with the Jenkins user able to reach the daemon
-//     (Install/Lint/Build below also run INSIDE per-stage `python:3.12-slim`
-//     containers via the Docker Pipeline plugin -- see the `agent { docker
-//     {...} }` blocks -- so this is a hard requirement for every stage
-//     here, not just the final push).
+//     AND able to run containers as their own host UID (Install/Lint/Build
+//     below run `docker run -u "$(id -u):$(id -g)"` against a plain
+//     `python:3.12-slim` image via `sh`, not the Docker Pipeline plugin's
+//     `agent { docker {...} }` -- that plugin isn't assumed to be
+//     installed, so this only needs the same Docker CLI the final push
+//     stage already requires, nothing extra).
 //   - A "Username with password" credential named dockerhub-credentials
 //     (Docker Hub username + a Personal Access Token, not your account
 //     password) -- create this in Jenkins yourself; the pipeline only
@@ -25,14 +27,15 @@
 // See JENKINS_SETUP.md for the one-time setup this Jenkinsfile assumes.
 
 pipeline {
-  // No default agent: the approval stage below deliberately runs with
-  // `agent none` so a pending manual approval never holds a Jenkins
-  // executor hostage (a well-known input-step pitfall). Every other stage
-  // declares its own agent instead. A single-VPS Jenkins has one agent
-  // regardless, so the workspace is shared across stages without needing
-  // stash/unstash -- `agent { docker {...} }` bind-mounts that same
-  // workspace directory into each stage's throwaway container.
-  agent none
+  // Single agent for the whole pipeline: Install/Lint/Build/Suggest/Push
+  // all run plain `sh` steps against the host's Docker CLI (some of them
+  // additionally shelling out to `docker run` for an ephemeral Python
+  // container) -- there's no per-stage Jenkins agent switch to reason
+  // about, so the workspace is just the workspace throughout. Only the
+  // approval stage overrides this with `agent none`, so a pending manual
+  // approval never holds a Jenkins executor hostage (a well-known
+  // input-step pitfall).
+  agent any
 
   options {
     disableConcurrentBuilds()
@@ -42,7 +45,6 @@ pipeline {
 
   stages {
     stage('Install') {
-      agent { docker { image 'python:3.12-slim' } }
       steps {
         // Only requirements.dev.txt (ruff, pytest, pyinstrument) -- NOT
         // requirements.txt. Lint (ruff) and Build (compileall) below only
@@ -54,30 +56,39 @@ pipeline {
         // benefit. pytest (which DOES need requirements.txt) is
         // deliberately not run in this pipeline -- see the file header.
         //
-        // venv lives under the shared workspace (not container-local
-        // site-packages), so it survives into the next stage's fresh
-        // container the same way OpenHands-contrib's node_modules survives
-        // across its per-stage `agent any` + `tools{}` stages.
+        // Runs Python inside a throwaway `python:3.12-slim` container
+        // (this Jenkins has no Python tool installation, and no Docker
+        // Pipeline plugin for a declarative `agent { docker {...} }`) as
+        // the Jenkins user's own host UID (`-u "$(id -u):$(id -g)"`) so
+        // .venv, created under the bind-mounted $WORKSPACE, is owned by
+        // that user afterward -- not root -- and needs no special cleanup
+        // before the next stage's container or the next build's checkout.
         sh '''
           set -euo pipefail
-          python -m venv .venv
-          .venv/bin/pip install --upgrade pip
-          .venv/bin/pip install -r requirements.dev.txt
+          docker run --rm \
+            -u "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$WORKSPACE:/workspace" -w /workspace \
+            python:3.12-slim \
+            bash -c "python -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.dev.txt"
         '''
       }
     }
 
     stage('Lint') {
-      agent { docker { image 'python:3.12-slim' } }
       steps {
         // Rule selection and the pre-existing-debt ignore list live in
         // ruff.toml, not here -- see that file for why.
-        sh '.venv/bin/ruff check .'
+        sh '''
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$WORKSPACE:/workspace" -w /workspace \
+            python:3.12-slim \
+            .venv/bin/ruff check .
+        '''
       }
     }
 
     stage('Build') {
-      agent { docker { image 'python:3.12-slim' } }
       steps {
         // "Build" here means a fast correctness pass (byte-compile every
         // tracked source tree, catching syntax errors) -- NOT a Docker
@@ -87,17 +98,20 @@ pipeline {
         // fast. That heavier build only happens in "Push to Docker Hub"
         // below, gated to the production branch and a human approval.
         sh '''
-          .venv/bin/python -m compileall -q \
-            agent.py initialize.py models.py preload.py prepare.py \
-            run_tunnel.py run_ui.py update_reqs.py \
-            agents api docker extensions helpers plugins prompts tests tools
+          docker run --rm \
+            -u "$(id -u):$(id -g)" \
+            -v "$WORKSPACE:/workspace" -w /workspace \
+            python:3.12-slim \
+            .venv/bin/python -m compileall -q \
+              agent.py initialize.py models.py preload.py prepare.py \
+              run_tunnel.py run_ui.py update_reqs.py \
+              agents api docker extensions helpers plugins prompts tests tools
         '''
       }
       post {
-        // Cleanup, not a functional step: .venv was created as root inside
-        // the python:3.12-slim container and would otherwise leave
-        // root-owned files in the shared workspace, which can break a
-        // non-root Jenkins user's next checkout/cleanup on this same node.
+        // .venv is only needed within this build's Install/Lint/Build
+        // trio; clearing it here keeps the workspace tidy before the
+        // production-only stages below (which don't need it) run.
         always {
           sh 'rm -rf .venv || true'
         }
@@ -105,7 +119,6 @@ pipeline {
     }
 
     stage('Suggest version') {
-      agent any
       when {
         branch 'production'
       }
@@ -185,9 +198,6 @@ pipeline {
           '''
         }
       }
-      // Stage-level post, not pipeline-level: the pipeline's top-level
-      // `agent none` means a top-level post has no agent to run `sh` on.
-      // This stage's own `agent any` gives this post a valid context.
       post {
         always {
           sh 'docker logout || true'
