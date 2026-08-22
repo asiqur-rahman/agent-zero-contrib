@@ -8,6 +8,7 @@
 ## Ownership
 
 - `openrouter_release_notes_system_prompt.md` is consumed by `.github/scripts/docker_release_plan.py`.
+- `push-agent-zero.sh` builds this fork via the repo-root `DockerfileLocal` and pushes `asiqurrahman/agent-zero:production` + `:vX.Y` to Docker Hub. Invoked by `make push`/`make push-check` and by the root `Jenkinsfile`'s production-branch release gate (see `JENKINS_SETUP.md`).
 - Additional repository maintenance scripts belong here when they are not runtime application code.
 
 ## Local Contracts

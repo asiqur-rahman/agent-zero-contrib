@@ -1,0 +1,22 @@
+# Lint config for Jenkins' Lint stage (see Jenkinsfile) and local `ruff check .`.
+#
+# Ratchet baseline: scoped to E9 (syntax errors) + F (pyflakes) -- the
+# smallest rule set that catches real correctness bugs (undefined names,
+# unreachable code, bad string formatting, etc.) without also requiring a
+# repo-wide reformat. The `ignore` list below carves out the handful of F
+# codes that already have pre-existing hits across this codebase (mostly
+# unused imports) so CI starts green without touching unrelated files.
+# Fixing that debt is a separate, deliberate task -- do not silently narrow
+# this list further just to keep CI passing.
+target-version = "py312"
+
+[lint]
+select = ["E9", "F"]
+ignore = [
+    "F401", # unused-import -- pre-existing (~176 hits at introduction)
+    "F541", # f-string-missing-placeholders -- pre-existing (~17 hits)
+    "F601", # multi-value-repeated-key-literal -- pre-existing (1 hit)
+    "F811", # redefined-while-unused -- pre-existing (2 hits)
+    "F821", # undefined-name -- pre-existing (2 hits)
+    "F841", # unused-variable -- pre-existing (~28 hits)
+]

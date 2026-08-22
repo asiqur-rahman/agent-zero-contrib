@@ -1,0 +1,28 @@
+# Local dev lifecycle only (see Makefile: up/down/clean/logs). Builds via
+# DockerfileLocal -- the current checkout, not a git-cloned branch -- unlike
+# docker/run/docker-compose.yml, which runs the prebuilt agent0ai/agent-zero
+# image and bind-mounts a separate host checkout into /a0 for self-update.
+# Named *.local.yml (not docker-compose.yml) so it can't collide with that
+# existing compose file if both are ever run from the same host.
+services:
+  agent-zero:
+    build:
+      context: .
+      dockerfile: DockerfileLocal
+      args:
+        CACHE_DATE: "${CACHE_DATE:-}"
+    image: agent-zero-local:latest
+    container_name: agent-zero-local
+    ports:
+      - "${A0_PORT:-50080}:80"
+    volumes:
+      - a0_usr:/a0/usr
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  a0_usr:
