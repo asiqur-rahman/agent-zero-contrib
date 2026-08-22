@@ -44,6 +44,23 @@ pipeline {
   }
 
   stages {
+    stage('Diagnose DooD mount') {
+      // TEMPORARY -- to be removed once the Docker-outside-of-Docker mount
+      // path is confirmed. If Jenkins itself runs in a container, docker
+      // run -v $WORKSPACE:... below asks the HOST daemon to bind-mount a
+      // path that only exists inside the Jenkins container, not on the
+      // host -- producing an empty/wrong mount. This inspects the Jenkins
+      // container's own volume mounts to find the real host-side path.
+      steps {
+        sh '''
+          echo "WORKSPACE=$WORKSPACE"
+          echo "hostname=$(hostname)"
+          [ -f /.dockerenv ] && echo "containerized: yes" || echo "containerized: no"
+          docker inspect "$(hostname)" --format "{{json .Mounts}}" || true
+        '''
+      }
+    }
+
     stage('Install') {
       steps {
         // Only requirements.dev.txt (ruff, pytest, pyinstrument) -- NOT
