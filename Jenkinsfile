@@ -44,20 +44,41 @@ pipeline {
   }
 
   stages {
-    stage('Diagnose DooD mount') {
-      // TEMPORARY -- to be removed once the Docker-outside-of-Docker mount
-      // path is confirmed. If Jenkins itself runs in a container, docker
-      // run -v $WORKSPACE:... below asks the HOST daemon to bind-mount a
-      // path that only exists inside the Jenkins container, not on the
-      // host -- producing an empty/wrong mount. This inspects the Jenkins
-      // container's own volume mounts to find the real host-side path.
+    stage('Resolve host workspace') {
+      // If Jenkins itself runs in a container (true on this VPS), $WORKSPACE
+      // is a path INSIDE the Jenkins container (e.g.
+      // /var/jenkins_home/workspace/agent-zero_production). Install/Lint/
+      // Build below talk to the HOST's Docker daemon over the shared
+      // socket, so a `docker run -v "$WORKSPACE:/workspace"` there asks the
+      // HOST to bind-mount that path -- which doesn't exist on the host,
+      // so Docker silently creates an empty directory and mounts that
+      // instead (confirmed the hard way: .venv creation "succeeded" into
+      // that empty mount, then `pip install -r requirements.dev.txt`
+      // failed with "No such file or directory" because the real checkout
+      // was never there).
+      //
+      // Fix: resolve the Jenkins container's own bind mount for
+      // /var/jenkins_home via `docker inspect` on itself, and rewrite
+      // $WORKSPACE to the equivalent HOST-side path. If Jenkins is NOT
+      // containerized (the other setup this pipeline supports -- see
+      // JENKINS_SETUP.md), that mount lookup returns nothing and
+      // $WORKSPACE is already a real host path, so it's used as-is.
       steps {
-        sh '''
-          echo "WORKSPACE=$WORKSPACE"
-          echo "hostname=$(hostname)"
-          [ -f /.dockerenv ] && echo "containerized: yes" || echo "containerized: no"
-          docker inspect "$(hostname)" --format "{{json .Mounts}}" || true
-        '''
+        script {
+          env.HOST_WORKSPACE = sh(
+            script: '''
+              set -euo pipefail
+              jenkins_home_host="$(docker inspect "$(hostname)" --format '{{range .Mounts}}{{if eq .Destination "/var/jenkins_home"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)"
+              if [ -z "$jenkins_home_host" ]; then
+                printf '%s' "$WORKSPACE"
+              else
+                printf '%s' "${jenkins_home_host}${WORKSPACE#/var/jenkins_home}"
+              fi
+            ''',
+            returnStdout: true
+          ).trim()
+          echo "Resolved host-side workspace: ${env.HOST_WORKSPACE}"
+        }
       }
     }
 
@@ -77,14 +98,15 @@ pipeline {
         // (this Jenkins has no Python tool installation, and no Docker
         // Pipeline plugin for a declarative `agent { docker {...} }`) as
         // the Jenkins user's own host UID (`-u "$(id -u):$(id -g)"`) so
-        // .venv, created under the bind-mounted $WORKSPACE, is owned by
-        // that user afterward -- not root -- and needs no special cleanup
-        // before the next stage's container or the next build's checkout.
+        // .venv, created under the bind-mounted $HOST_WORKSPACE (see the
+        // "Resolve host workspace" stage above), is owned by that user
+        // afterward -- not root -- and needs no special cleanup before the
+        // next stage's container or the next build's checkout.
         sh '''
           set -euo pipefail
           docker run --rm \
             -u "$(id -u):$(id -g)" -e HOME=/tmp \
-            -v "$WORKSPACE:/workspace" -w /workspace \
+            -v "$HOST_WORKSPACE:/workspace" -w /workspace \
             python:3.12-slim \
             bash -c "python -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.dev.txt"
         '''
@@ -98,7 +120,7 @@ pipeline {
         sh '''
           docker run --rm \
             -u "$(id -u):$(id -g)" \
-            -v "$WORKSPACE:/workspace" -w /workspace \
+            -v "$HOST_WORKSPACE:/workspace" -w /workspace \
             python:3.12-slim \
             .venv/bin/ruff check .
         '''
@@ -117,7 +139,7 @@ pipeline {
         sh '''
           docker run --rm \
             -u "$(id -u):$(id -g)" \
-            -v "$WORKSPACE:/workspace" -w /workspace \
+            -v "$HOST_WORKSPACE:/workspace" -w /workspace \
             python:3.12-slim \
             .venv/bin/python -m compileall -q \
               agent.py initialize.py models.py preload.py prepare.py \
