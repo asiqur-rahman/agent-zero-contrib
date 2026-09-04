@@ -49,10 +49,10 @@ After the first push, re-run **Scan Multibranch Pipeline Now** on the job (or wa
 
 ## 6. Trigger on push
 
-Either:
+Both are configured, so a push is picked up near-instantly and the periodic scan is just a safety net if a delivery is ever missed:
 
-- **Webhook (recommended, near-instant):** GitHub repo -> Settings -> Webhooks -> Add webhook -> Payload URL `http://<your-vps>:<jenkins-port>/github-webhook/`, content type `application/json`, event: **Just the push event**. Requires your VPS's Jenkins port reachable from GitHub (a public IP/domain, or a tunnel).
-- **Polling (no inbound access needed):** on the Multibranch Pipeline job, enable **Scan Multibranch Pipeline Triggers** -> periodically (e.g. every 5 minutes) instead of a webhook, if your VPS isn't publicly reachable.
+- **Webhook (primary, near-instant):** GitHub repo -> Settings -> Webhooks, Payload URL `https://jenkins.cloud.braintechsolution.com/github-webhook/`, content type `application/json`, event: **Just the push event**. Created via `gh api repos/asiqur-rahman/agent-zero-contrib/hooks` (webhook id `674457553`) and verified with a ping delivery (`200 OK`) -- Jenkins is publicly reachable at this domain, so no tunnel was needed.
+- **Polling (fallback):** the Multibranch Pipeline job's **Scan Multibranch Pipeline Triggers** -> "Periodically if not otherwise run" stays enabled underneath the webhook, so a build still eventually happens even if a webhook delivery is ever dropped.
 
 ## What the pipeline actually does
 
