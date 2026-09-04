@@ -67,9 +67,9 @@ Every push to any branch: install, lint, build -- fully automatic, no approval n
 Push to `production` specifically, additionally:
 
 1. Suggests the next version (reads Docker Hub's existing `vX.Y` tags on `asiqurrahman/agent-zero`, bumps the minor -- same logic as `make push`, matching upstream agent-zero's own major.minor tagging with no patch component)
-2. **Pauses and waits for a human to click "Push" in the Jenkins UI**, showing the suggested version (editable) before anything happens
-3. If nobody clicks "Push" (or clicks "Abort") within **15 minutes**, the push is skipped and the build ends as `ABORTED` -- it does not fail, and it does not push
-4. Only after approval within that window: builds fresh via `DockerfileLocal` (the exact commit Jenkins checked out, not a separate `git clone` of a branch) and pushes `asiqurrahman/agent-zero:production` + `:vX.Y` to Docker Hub
+2. **Opens a 15-minute review window in the Jenkins UI**, showing the suggested version (editable) before anything happens
+3. Clicking **Push** within that window approves immediately with the (possibly edited) version. Clicking **Abort** explicitly declines and skips the push -- the build ends as `ABORTED`, and it does not push. Letting the window lapse with no response is treated as approval: it auto-proceeds with the suggested version, exactly as if Push had been clicked -- this is an intentional design choice (see the Jenkinsfile's own comments), not a safe-by-default timeout
+4. Builds fresh via `DockerfileLocal` (the exact commit Jenkins checked out, not a separate `git clone` of a branch) and pushes `asiqurrahman/agent-zero:production` + `:vX.Y` to Docker Hub
 
 ## Local equivalents
 

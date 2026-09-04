@@ -7,10 +7,12 @@
 // not in CI -- matching this repo's existing GitHub Actions setup, which
 // also doesn't run pytest (see .github/workflows/docker-publish.yml).
 //
-// production branch only: an approval gate pauses the pipeline in the
-// Jenkins UI before anything is pushed to Docker Hub -- nothing publishes
-// without a human clicking Push within 15 minutes. Letting that window
-// pass (or clicking Abort) skips the push instead of failing the build.
+// production branch only: a 15-minute review window pauses the pipeline in
+// the Jenkins UI before anything is pushed to Docker Hub. Clicking Push
+// approves immediately; clicking Abort explicitly declines and skips the
+// push. Letting the window lapse with no response auto-approves with the
+// suggested version and proceeds to push -- silence is not a safe default
+// here by design; only an explicit Abort skips the publish.
 //
 // Requires on the Jenkins agent:
 //   - Docker CLI + buildx, with the Jenkins user able to reach the daemon
@@ -179,19 +181,23 @@ pipeline {
         branch 'production'
       }
       steps {
-        // Pauses here until a human approves in the Jenkins UI -- lint
-        // and build above already ran unattended; only the publish step
-        // waits on a person. A single input() parameter returns its raw
+        // Pauses here for a human in the Jenkins UI -- lint and build above
+        // already ran unattended; only the publish step waits on a person,
+        // and only briefly. A single input() parameter returns its raw
         // value directly (not a map) -- must capture it explicitly or
         // RELEASE_VERSION would be empty in the next stage.
         //
-        // Wrapped in its own timeout so silence has a safe default: no
-        // approval within 15 minutes means "don't push", not "wait
-        // forever" (the input step has no deadline of its own) and not
-        // "fail the build" (the pipeline's own 45-minute timeout would
-        // otherwise eventually abort the whole run). Catching the
-        // interruption here and leaving RELEASE_VERSION unset lets the
-        // next stage's `when` skip the push cleanly instead.
+        // Wrapped in its own timeout so silence has a defined outcome: no
+        // response within 15 minutes auto-approves with the suggested
+        // version and proceeds to push (the input step has no deadline of
+        // its own, and the pipeline's own 45-minute timeout is a much
+        // coarser backstop, not a substitute for this). An explicit click
+        // on "Abort" is still honored as a real human decision and skips
+        // the push -- only silence, not a rejection, is treated as
+        // approval. Distinguishing the two relies on the timeout step's
+        // interruption cause carrying "Timeout" in its description, which
+        // is a stable, version-independent string across Jenkins releases
+        // (unlike matching on the internal cause class name).
         script {
           try {
             timeout(time: 15, unit: 'MINUTES') {
@@ -208,9 +214,17 @@ pipeline {
               )
             }
           } catch (err) {
-            env.RELEASE_VERSION = null
-            currentBuild.result = 'ABORTED'
-            echo 'No approval within 15 minutes (or approval was declined) -- skipping the Docker Hub push.'
+            def timedOut = err.getCauses()?.any { cause ->
+              cause.getShortDescription()?.contains('Timeout')
+            }
+            if (timedOut) {
+              env.RELEASE_VERSION = env.SUGGESTED_VERSION
+              echo "No approval within 15 minutes -- auto-approving ${env.SUGGESTED_VERSION} and proceeding to push."
+            } else {
+              env.RELEASE_VERSION = null
+              currentBuild.result = 'ABORTED'
+              echo 'Push was explicitly declined -- skipping the Docker Hub push.'
+            }
           }
         }
       }
