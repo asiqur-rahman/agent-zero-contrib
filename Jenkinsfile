@@ -42,7 +42,19 @@ pipeline {
   options {
     disableConcurrentBuilds()
     timestamps()
-    timeout(time: 45, unit: 'MINUTES')
+    // Whole-pipeline safety net, not the real per-stage budget (see the
+    // Push to Docker Hub stage's own timeout for that) -- this just needs
+    // to comfortably cover every stage's worst case added together: fast
+    // Install/Lint/Build (~5 min), a full 15-minute approval wait, and the
+    // DockerfileLocal build+push itself, which pulls agent0ai/agent-zero-base
+    // plus heavy ML deps (torch, faiss, sentence-transformers,
+    // unstructured[all-docs]) and has taken over 30 minutes on a slow
+    // network day even when it ultimately succeeded. 45 minutes was too
+    // tight for that combination and killed two in-progress, otherwise
+    // fine, buildx runs mid-push with "context canceled" -- Jenkins'
+    // timeout sends an interrupt to whatever step is running when the
+    // clock runs out, which looks like a build failure but isn't one.
+    timeout(time: 90, unit: 'MINUTES')
   }
 
   stages {
@@ -239,16 +251,24 @@ pipeline {
         }
       }
       steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'dockerhub-credentials',
-          usernameVariable: 'DOCKERHUB_USERNAME',
-          passwordVariable: 'DOCKERHUB_TOKEN'
-        )]) {
-          sh '''
-            set -euo pipefail
-            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-            CLI_VERSION="${RELEASE_VERSION}" bash scripts/push-agent-zero.sh
-          '''
+        // Explicit ceiling for the actual heavy work, decoupled from the
+        // pipeline-level timeout above (which also has to cover the
+        // 15-minute approval wait before this stage even starts). 60
+        // minutes leaves real headroom over the ~30+ minutes this has
+        // taken on a slow network day, while still failing a genuinely
+        // stuck build well before the pipeline-level 90-minute net would.
+        timeout(time: 60, unit: 'MINUTES') {
+          withCredentials([usernamePassword(
+            credentialsId: 'dockerhub-credentials',
+            usernameVariable: 'DOCKERHUB_USERNAME',
+            passwordVariable: 'DOCKERHUB_TOKEN'
+          )]) {
+            sh '''
+              set -euo pipefail
+              echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+              CLI_VERSION="${RELEASE_VERSION}" bash scripts/push-agent-zero.sh
+            '''
+          }
         }
       }
       post {
