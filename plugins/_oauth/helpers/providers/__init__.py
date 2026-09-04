@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from plugins._oauth.helpers.providers.base import (
     CODEX_PROVIDER_ID,
+    COMMAND_CODE_PROVIDER_ID,
     DUMMY_API_KEY,
     GEMINI_API_PROVIDER_ID,
     GITHUB_COPILOT_PROVIDER_ID,
@@ -26,6 +27,7 @@ from plugins._oauth.helpers.providers.registry import (
 
 __all__ = [
     "CODEX_PROVIDER_ID",
+    "COMMAND_CODE_PROVIDER_ID",
     "DUMMY_API_KEY",
     "GEMINI_API_PROVIDER_ID",
     "GITHUB_COPILOT_PROVIDER_ID",

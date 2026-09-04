@@ -21,6 +21,7 @@ const PROVIDER_MARKS = {
   google: "cloud",
   openai: "key",
   xai: "neurology",
+  command_code: "smart_toy",
 };
 const MODEL_SLOTS = [
   {

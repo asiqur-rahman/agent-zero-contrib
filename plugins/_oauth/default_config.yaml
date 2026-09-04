@@ -58,3 +58,6 @@ gemini_api:
 
 xai_grok:
   enabled: true
+
+command_code:
+  enabled: true

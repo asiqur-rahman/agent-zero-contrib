@@ -40,9 +40,17 @@ OAuth-backed model providers do not require users to enter API keys. Agent Zero 
 - Supports manual callback paste for remote hosts where the browser cannot reach the local callback directly.
 - Stores credentials under `usr/plugins/_oauth/xai_grok/auth.json`.
 
+### Command Code (`command_code_cli`)
+
+- Command Code (https://commandcode.ai) publishes no OAuth/REST API for third parties, so this provider does not drive a login flow the way the others do -- it shells out to the locally installed `command-code` CLI binary and uses its own public contract instead: `command-code status --json` for account status, and `command-code -p ... --output-format json` (headless mode) for generation.
+- Sign-in happens outside Agent Zero: install the CLI (`npm i -g command-code`) and run `command-code login` yourself on the machine running Agent Zero, then click Refresh in this settings page. `start_login`/`poll_login`/callback methods all fail closed with that instruction -- there is no OAuth handshake for this plugin to perform.
+- Requires Node.js and the `command-code` npm package on the PATH of the process running Agent Zero. Not currently installed in the shipped Docker image -- this provider only works when Agent Zero runs where you've installed the CLI yourself (e.g. a native `python run_ui.py` checkout).
+- Each chat completion is a fresh, stateless `command-code -p` invocation (no `--resume`), matching how Agent Zero sends its full conversation state on every call regardless of backend.
+- "Disconnect" cannot sign the CLI out remotely -- the credential lives in `~/.commandcode`, shared with any other tool using it on that machine. Run `command-code logout` yourself if you want to sign out.
+
 ## Usage Plan Metadata
 
-The status API exposes `usage_plan_catalog` for subscription and billing context. It covers only connectable providers: Codex, GitHub Copilot, Google Cloud Gemini, and xAI Grok.
+The status API exposes `usage_plan_catalog` for subscription and billing context. It covers only connectable providers: Codex, GitHub Copilot, Google Cloud Gemini, and xAI Grok. Command Code is not included -- its billing/tier metadata isn't published anywhere this plugin can read.
 
 The same status response also includes `oauth_accounts`, a compact summary used by the settings modal, welcome discovery card, and onboarding wizard. Keep that summary provider-registry driven so new OAuth providers appear consistently across those surfaces.
 

@@ -13,6 +13,7 @@
 - `conf/model_providers.yaml` owns OAuth-backed model provider definitions and their `api_key_mode: oauth` metadata.
 - `api/` owns provider-aware settings modal endpoints such as status, login start, polling, manual callback, models, and disconnect.
 - `helpers/providers/` owns provider implementations, provider metadata, registry wiring, token storage helpers, and provider-specific endpoint validation.
+- `helpers/command_code_cli.py` owns the Command Code CLI subprocess contract (install/status checks, headless prompt execution) consumed by `helpers/providers/command_code.py`. This is the one provider in this plugin with no OAuth handshake -- see its module docstring and `plugins/_oauth/README.md` for why.
 - `helpers/summary.py` owns the shared provider-status/account summary shape consumed by the status API, discovery cards, onboarding, and OAuth settings UI.
 - `helpers/routes.py` owns local OAuth callback and OpenAI-compatible proxy routes mounted by the route bootstrap extension.
 - `webui/config.html` and `webui/oauth-config-store.js` own the OAuth Connections settings UI.
@@ -61,6 +62,7 @@
 - Keep the OAuth settings page account-backed only. API-key and local provider setup belongs in model configuration and onboarding.
 - Treat Gemini API OAuth as a Google Cloud OAuth-client flow. Do not conflate it with Antigravity, Gemini Code Assist, Gemini CLI, Google AI Pro, or Google AI Ultra subscription quota.
 - Treat Claude Code subscription auth and Antigravity product auth as non-connectable unless their vendors provide an explicit third-party provider contract.
+- Command Code (`command_code_cli`) is the one exception this plugin connects without an OAuth handshake: its own CLI ships a public `status --json` / headless `-p --output-format json` contract meant for third-party tooling, which counts as the "explicit third-party provider contract" the rule above requires. Do not use it as precedent for wrapping a vendor CLI that has no such public, documented contract -- that is exactly what the Claude Code/Antigravity exclusion above still forbids.
 - Keep user-facing errors safe: report setup or tier restrictions without exposing tokens, callback secrets, or raw auth payloads.
 
 ## Verification
