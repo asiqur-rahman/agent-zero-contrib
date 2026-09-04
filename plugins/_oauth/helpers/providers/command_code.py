@@ -69,13 +69,42 @@ class CommandCodeOAuthProvider:
         return result
 
     def start_login(self, input: dict[str, Any] | None = None, request: Any = None) -> LoginStartResult:
+        # There is no login flow to start -- Command Code sign-in always
+        # happens outside Agent Zero (see NOT_DRIVEN_MESSAGE / the module
+        # docstring). What this DOES do on a "Connect" click is the one part
+        # that is safe to automate: installing the CLI itself. `npm install
+        # -g` touches no credentials and requires no account -- it is pure
+        # software installation, not the login step. If it's already
+        # installed, or npm isn't available, or the install fails, this
+        # still always returns ok=False with an explanatory message; the
+        # actual authentication step is never attempted here.
         del input, request
+        from plugins._oauth.helpers import command_code_cli
+
+        if command_code_cli.is_installed():
+            return LoginStartResult(
+                ok=False,
+                provider_id=COMMAND_CODE_PROVIDER_ID,
+                flow="external_cli",
+                error=NOT_DRIVEN_MESSAGE,
+                message=NOT_DRIVEN_MESSAGE,
+            )
+
+        install = command_code_cli.install_latest()
+        if install.get("ok"):
+            message = (
+                "Installed the Command Code CLI. "
+                + NOT_DRIVEN_MESSAGE
+            )
+        else:
+            message = f"{NOT_DRIVEN_MESSAGE} Automatic install failed: {install.get('error')}"
+
         return LoginStartResult(
             ok=False,
             provider_id=COMMAND_CODE_PROVIDER_ID,
             flow="external_cli",
-            error=NOT_DRIVEN_MESSAGE,
-            message=NOT_DRIVEN_MESSAGE,
+            error=message,
+            message=message,
         )
 
     def poll_login(self, input: dict[str, Any] | None = None, request: Any = None) -> LoginPollResult:

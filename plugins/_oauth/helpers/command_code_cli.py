@@ -13,9 +13,63 @@ from typing import Any
 # The user authenticates with `command-code login` themselves, outside Agent
 # Zero; this module only ever reads that CLI's public status/output surface.
 COMMAND_CODE_BINARY = "command-code"
+NPM_BINARY = "npm"
 VERSION_TIMEOUT_SECONDS = 5
 STATUS_TIMEOUT_SECONDS = 8
 RUN_TIMEOUT_SECONDS = 300
+INSTALL_TIMEOUT_SECONDS = 180
+
+
+def npm_available() -> bool:
+    try:
+        result = subprocess.run(
+            [NPM_BINARY, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=VERSION_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def install_latest() -> dict[str, Any]:
+    """Runs `npm install -g command-code@latest`.
+
+    This only ever installs the CLI binary itself -- it never touches
+    authentication. A successful install still requires the user to run
+    `command-code login` themselves; nothing here attempts to automate that,
+    and it never will (see the module docstring for why).
+    """
+    if not npm_available():
+        return {
+            "ok": False,
+            "error": "npm is not available on PATH. Install Node.js first, then retry.",
+        }
+
+    try:
+        result = subprocess.run(
+            [NPM_BINARY, "install", "-g", "command-code@latest"],
+            capture_output=True,
+            text=True,
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "error": f"npm install timed out after {INSTALL_TIMEOUT_SECONDS}s.",
+        }
+    except OSError as exc:
+        return {"ok": False, "error": f"Unable to run npm install: {exc}"}
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        # npm's own output can be long (deprecation warnings, audit noise);
+        # keep only the tail, which is where the actual failure reason is.
+        detail = detail[-500:] if detail else "npm install failed."
+        return {"ok": False, "error": detail}
+
+    return {"ok": True, "error": ""}
 
 
 def is_installed() -> bool:

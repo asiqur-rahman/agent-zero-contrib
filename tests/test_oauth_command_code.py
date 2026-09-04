@@ -200,12 +200,10 @@ def test_provider_metadata_and_protocol_stubs():
     assert metadata.auth_flow == "external_cli"
     assert metadata.default_models == CURATED_MODELS
 
-    # This provider drives no OAuth flow -- every login-flow method must
-    # fail closed with the same explanatory message, not silently no-op.
-    start = provider.start_login()
-    assert start.ok is False
-    assert start.error == NOT_DRIVEN_MESSAGE
-
+    # This provider drives no OAuth flow -- every login-flow method (other
+    # than start_login, which has its own dedicated tests below covering the
+    # auto-install branch) must fail closed with an explanatory message, not
+    # silently no-op.
     poll = provider.poll_login()
     assert poll.ok is False
 
@@ -216,6 +214,90 @@ def test_provider_metadata_and_protocol_stubs():
     assert manual.ok is False
 
     assert provider.api_key() == "oauth"
+
+
+def test_start_login_when_already_installed_just_explains_it_cant_drive_login(monkeypatch):
+    monkeypatch.setattr(command_code_cli, "is_installed", lambda: True)
+
+    def fail_if_called():
+        raise AssertionError("install_latest() must not run when already installed")
+
+    monkeypatch.setattr(command_code_cli, "install_latest", fail_if_called)
+
+    provider = CommandCodeOAuthProvider()
+    result = provider.start_login()
+    assert result.ok is False
+    assert result.error == NOT_DRIVEN_MESSAGE
+
+
+def test_start_login_auto_installs_cli_when_missing(monkeypatch):
+    # Installing the CLI is the one thing safe to automate here -- it is
+    # pure software installation, no credentials involved. Actual sign-in
+    # must still never be attempted.
+    monkeypatch.setattr(command_code_cli, "is_installed", lambda: False)
+    monkeypatch.setattr(command_code_cli, "install_latest", lambda: {"ok": True, "error": ""})
+
+    provider = CommandCodeOAuthProvider()
+    result = provider.start_login()
+    assert result.ok is False
+    assert "Installed the Command Code CLI" in result.error
+    assert "command-code login" in result.error
+
+
+def test_start_login_reports_install_failure_without_ok(monkeypatch):
+    monkeypatch.setattr(command_code_cli, "is_installed", lambda: False)
+    monkeypatch.setattr(
+        command_code_cli,
+        "install_latest",
+        lambda: {"ok": False, "error": "npm is not available on PATH. Install Node.js first, then retry."},
+    )
+
+    provider = CommandCodeOAuthProvider()
+    result = provider.start_login()
+    assert result.ok is False
+    assert "Automatic install failed" in result.error
+    assert "npm is not available" in result.error
+
+
+def test_install_latest_skips_npm_call_when_npm_missing(monkeypatch):
+    monkeypatch.setattr(command_code_cli, "npm_available", lambda: False)
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("subprocess.run must not be called when npm is unavailable")
+
+    monkeypatch.setattr(command_code_cli.subprocess, "run", fail_if_called)
+
+    result = command_code_cli.install_latest()
+    assert result["ok"] is False
+    assert "Install Node.js first" in result["error"]
+
+
+def test_install_latest_runs_npm_install_dash_g_latest(monkeypatch):
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return FakeCompletedProcess(0, "added 1 package\n")
+
+    monkeypatch.setattr(command_code_cli, "npm_available", lambda: True)
+    monkeypatch.setattr(command_code_cli.subprocess, "run", fake_run)
+
+    result = command_code_cli.install_latest()
+    assert result["ok"] is True
+    assert captured["args"] == ["npm", "install", "-g", "command-code@latest"]
+
+
+def test_install_latest_surfaces_npm_failure(monkeypatch):
+    monkeypatch.setattr(command_code_cli, "npm_available", lambda: True)
+    monkeypatch.setattr(
+        command_code_cli.subprocess,
+        "run",
+        lambda *a, **k: FakeCompletedProcess(1, "", "EACCES: permission denied\n"),
+    )
+
+    result = command_code_cli.install_latest()
+    assert result["ok"] is False
+    assert "EACCES" in result["error"]
 
 
 def test_provider_disconnect_never_shells_out_to_logout():

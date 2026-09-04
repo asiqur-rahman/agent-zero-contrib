@@ -44,7 +44,11 @@ class DiscoveryCardsExtension(Extension):
         available = accounts.get("available") or []
         source = connected if connected else available
         chips = []
-        for account in source[:4]:
+        # No cap: the frontend chip list wraps responsively (see
+        # discovery-cards.html's `x-for`), so a fixed slice here just needs
+        # bumping every time a new OAuth provider is registered -- it
+        # already silently dropped a 5th provider (Command Code) before this.
+        for account in source:
             if not isinstance(account, dict):
                 continue
             chips.append({
