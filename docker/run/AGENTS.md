@@ -18,7 +18,6 @@
 
 - `BRANCH` is required for branch-based Docker builds.
 - Preserve exposed ports for SSH, HTTP, and tunneled services unless docs and workflows are updated together.
-- The `WEB_UI_PORT` environment variable controls the container's internal listen port for both the UI process (`fs/exe/self_update_manager.py`'s `launch_ui_process()`) and the tunnel relay (`fs/exe/run_tunnel_api.sh`), defaulting to `80` when unset. The two must keep reading the same variable so the tunnel always relays to whatever port the UI actually bound to.
 - Keep the two-runtime Python model aligned with the root contract.
 - Keep runtime desktop packages on `kali-last-snapshot`; carry the rolling base's matching ATK introspection package into that transaction, then pin the verified Python 3.13-compatible LibreOffice and complete Xpra runtime versions in `fs/ins/install_additional.sh` for both published architectures.
 - Do not bake secrets, local `.env` values, or user data into the image.

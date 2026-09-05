@@ -944,13 +944,12 @@ def launch_ui_process(repo_dir: Path, logger: AttemptLogger) -> subprocess.Popen
         logger.log("prepare.py not found, skipping prepare step")
 
     logger.log("Starting Agent Zero UI")
-    web_ui_port = os.environ.get("WEB_UI_PORT", "80")
     return subprocess.Popen(
         [
             sys.executable,
             str(repo_dir / "run_ui.py"),
             "--dockerized=true",
-            f"--port={web_ui_port}",
+            "--port=80",
             "--host=0.0.0.0",
         ],
         cwd=repo_dir,
