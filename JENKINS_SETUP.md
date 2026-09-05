@@ -36,7 +36,18 @@ The `Jenkinsfile`'s `when { branch 'production' }` conditions require a **Multib
 3. Build configuration: **by Jenkinsfile**, path `Jenkinsfile` (default)
 4. Save -- Jenkins scans branches and creates a sub-job per branch it finds
 
-## 5. Create the `production` branch
+## 5. Approve the getCauses() script signature
+
+The "Approve Docker Hub push" stage distinguishes a lapsed timeout (auto-approve) from an explicit Abort click (skip the push) by inspecting `err.getCauses()` on the caught interruption. Jenkins' Groovy sandbox blocks this method by default the first time any Jenkinsfile calls it -- until approved, the `catch` block itself throws `RejectedAccessException` and fails the whole build instead of resolving timeout vs. abort (confirmed the hard way: this is exactly what failed build #13 the first time the 5-minute window lapsed).
+
+One-time fix, needed on any fresh Jenkins install this Jenkinsfile runs on:
+
+1. Let (or force) a build reach the "Approve Docker Hub push" stage and hit the RejectedAccessException once -- this is what registers the pending signature.
+2. Jenkins -> **Manage Jenkins** -> **In-process Script Approval**
+3. Find `method org.jenkinsci.plugins.workflow.steps.FlowInterruptedException getCauses` and click **Approve**
+4. Re-run (or Replay) the failed build -- it will now resolve timeout vs. abort correctly
+
+## 6. Create the `production` branch
 
 This fork's upstream-tracking branches (`main`, `development`, `testing`, `ready`) mirror `agent0ai/agent-zero` and get synced from `upstream` -- they are not a good release-trigger, since a sync from upstream would fire the gate too. `production` is a dedicated branch that only exists on your fork, pushed to only when you actually want to cut a release:
 
@@ -47,7 +58,7 @@ git push -u origin production
 
 After the first push, re-run **Scan Multibranch Pipeline Now** on the job (or wait for its next scheduled scan) so Jenkins picks up the new branch and creates its sub-job.
 
-## 6. Trigger on push
+## 7. Trigger on push
 
 Both are configured, so a push is picked up near-instantly and the periodic scan is just a safety net if a delivery is ever missed:
 
@@ -67,7 +78,7 @@ Every push to any branch: install, lint, build -- fully automatic, no approval n
 Push to `production` specifically, additionally:
 
 1. Suggests the next version (reads Docker Hub's existing `vX.Y` tags on `asiqurrahman/agent-zero`, bumps the minor -- same logic as `make push`, matching upstream agent-zero's own major.minor tagging with no patch component)
-2. **Opens a 15-minute review window in the Jenkins UI**, showing the suggested version (editable) before anything happens
+2. **Opens a 5-minute review window in the Jenkins UI**, showing the suggested version (editable) before anything happens
 3. Clicking **Push** within that window approves immediately with the (possibly edited) version. Clicking **Abort** explicitly declines and skips the push -- the build ends as `ABORTED`, and it does not push. Letting the window lapse with no response is treated as approval: it auto-proceeds with the suggested version, exactly as if Push had been clicked -- this is an intentional design choice (see the Jenkinsfile's own comments), not a safe-by-default timeout
 4. Builds fresh via `DockerfileLocal` (the exact commit Jenkins checked out, not a separate `git clone` of a branch) and pushes `asiqurrahman/agent-zero:production` + `:vX.Y` to Docker Hub
 

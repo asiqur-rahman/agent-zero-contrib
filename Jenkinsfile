@@ -7,7 +7,7 @@
 // not in CI -- matching this repo's existing GitHub Actions setup, which
 // also doesn't run pytest (see .github/workflows/docker-publish.yml).
 //
-// production branch only: a 15-minute review window pauses the pipeline in
+// production branch only: a 5-minute review window pauses the pipeline in
 // the Jenkins UI before anything is pushed to Docker Hub. Clicking Push
 // approves immediately; clicking Abort explicitly declines and skips the
 // push. Letting the window lapse with no response auto-approves with the
@@ -45,7 +45,7 @@ pipeline {
     // Whole-pipeline safety net, not the real per-stage budget (see the
     // Push to Docker Hub stage's own timeout for that) -- this just needs
     // to comfortably cover every stage's worst case added together: fast
-    // Install/Lint/Build (~5 min), a full 15-minute approval wait, and the
+    // Install/Lint/Build (~5 min), a full 5-minute approval wait, and the
     // DockerfileLocal build+push itself, which pulls agent0ai/agent-zero-base
     // plus heavy ML deps (torch, faiss, sentence-transformers,
     // unstructured[all-docs]) and has taken over 30 minutes on a slow
@@ -200,9 +200,9 @@ pipeline {
         // RELEASE_VERSION would be empty in the next stage.
         //
         // Wrapped in its own timeout so silence has a defined outcome: no
-        // response within 15 minutes auto-approves with the suggested
+        // response within 5 minutes auto-approves with the suggested
         // version and proceeds to push (the input step has no deadline of
-        // its own, and the pipeline's own 45-minute timeout is a much
+        // its own, and the pipeline's own 90-minute timeout is a much
         // coarser backstop, not a substitute for this). An explicit click
         // on "Abort" is still honored as a real human decision and skips
         // the push -- only silence, not a rejection, is treated as
@@ -210,9 +210,17 @@ pipeline {
         // interruption cause carrying "Timeout" in its description, which
         // is a stable, version-independent string across Jenkins releases
         // (unlike matching on the internal cause class name).
+        //
+        // getCauses() needs a one-time Jenkins admin approval the first
+        // time this signature is used: Manage Jenkins > In-process Script
+        // Approval > Approve the pending
+        // "method ...FlowInterruptedException getCauses" entry. Until
+        // approved, the catch block itself throws
+        // RejectedAccessException and fails the whole build instead of
+        // resolving timeout vs. abort -- see JENKINS_SETUP.md.
         script {
           try {
-            timeout(time: 15, unit: 'MINUTES') {
+            timeout(time: 5, unit: 'MINUTES') {
               env.RELEASE_VERSION = input(
                 message: "Push asiqurrahman/agent-zero to Docker Hub as :production + :${env.SUGGESTED_VERSION}?",
                 ok: 'Push',
@@ -231,7 +239,7 @@ pipeline {
             }
             if (timedOut) {
               env.RELEASE_VERSION = env.SUGGESTED_VERSION
-              echo "No approval within 15 minutes -- auto-approving ${env.SUGGESTED_VERSION} and proceeding to push."
+              echo "No approval within 5 minutes -- auto-approving ${env.SUGGESTED_VERSION} and proceeding to push."
             } else {
               env.RELEASE_VERSION = null
               currentBuild.result = 'ABORTED'
@@ -253,7 +261,7 @@ pipeline {
       steps {
         // Explicit ceiling for the actual heavy work, decoupled from the
         // pipeline-level timeout above (which also has to cover the
-        // 15-minute approval wait before this stage even starts). 60
+        // 5-minute approval wait before this stage even starts). 60
         // minutes leaves real headroom over the ~30+ minutes this has
         // taken on a slow network day, while still failing a genuinely
         // stuck build well before the pipeline-level 90-minute net would.
