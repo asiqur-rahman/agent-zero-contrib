@@ -10,6 +10,7 @@ services:
           memory: 4096M
     environment:
       - TZ=Asia/Dhaka
+      - WEB_UI_PORT=80
     hostname: agent-zero
     image: asiqurrahman/agent-zero:production
     labels:
@@ -31,11 +32,19 @@ services:
       - agent-zero-network
     privileged: false
     healthcheck:
+      # CMD-SHELL (not CMD) so $WEB_UI_PORT expands against the container's
+      # own runtime environment at healthcheck time -- a plain CMD exec-form
+      # array never substitutes variables, so changing WEB_UI_PORT without
+      # this would leave the healthcheck silently checking the old port 80.
+      # The $$ (not $) is required: Compose resolves a single-$ reference
+      # itself at compose-file parse time, from whatever shell ran `docker
+      # compose`/CasaOS's own invocation -- never from this service's
+      # `environment:` block. $$ escapes that, so Compose passes the
+      # reference through literally for the container's own /bin/sh (via
+      # CMD-SHELL) to expand against its real runtime environment instead.
       test:
-        - CMD
-        - wget
-        - -qO-
-        - http://127.0.0.1:80/api/health
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:$${WEB_UI_PORT:-80}/api/health
       interval: 15s
       timeout: 5s
       retries: 12
@@ -45,6 +54,13 @@ services:
         - container: TZ
           description:
             en_US: Timezone
+        - container: WEB_UI_PORT
+          description:
+            en_US: Container-internal Web UI port (default 80). Only change
+              this if you also update the Port section's Container value to
+              match -- the Host/published side (50080) stays whatever you
+              set there regardless; only the internal side needs to agree
+              with this variable.
       volumes:
         - container: /a0/usr
           description:
