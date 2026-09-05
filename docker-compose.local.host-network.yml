@@ -1,0 +1,47 @@
+# Standalone alternative to docker-compose.local.yml, only needed to test
+# the Command Code CLI's login flow inside this local dev container.
+# `command-code login` spins up a local OAuth callback server INSIDE the
+# container on a port it picks itself (not fixed, not documented) -- with
+# the default bridge networking in docker-compose.local.yml, your host
+# browser can never reach that container-internal port. Host networking
+# makes the container share the host's network stack directly, so whatever
+# port command-code picks is automatically reachable at that same port on
+# the host, with nothing to guess or publish.
+#
+# A separate full file, not a docker-compose.local.yml override layer:
+# Compose's merge semantics for `ports`/`network_mode` across multiple -f
+# files are version-sensitive (some versions error on "cannot set port
+# bindings and network mode to host at the same time" if a base file's
+# `ports:` survives the merge) -- a standalone file sidesteps that entirely.
+#
+# Usage (run standalone, not layered with docker-compose.local.yml):
+#   docker compose -p agent-zero-local -f docker-compose.local.host-network.yml up -d --build
+#
+# With host networking, ports: has no effect and is omitted -- whatever port
+# the UI process binds to inside the container IS that port on the host
+# directly, no remapping possible. WEB_UI_PORT (read by
+# docker/run/fs/exe/self_update_manager.py's launch_ui_process(), default
+# "80" everywhere else) is set to 50080 below just so this file's WebUI
+# lands on the same familiar port docker-compose.local.yml's bridge-mode
+# port mapping already uses -- not a requirement of host networking itself.
+services:
+  agent-zero:
+    build:
+      context: .
+      dockerfile: DockerfileLocal
+      args:
+        CACHE_DATE: "${CACHE_DATE:-}"
+    image: agent-zero-local:latest
+    container_name: agent-zero-local
+    network_mode: host
+    environment:
+      - WEB_UI_PORT=50080
+    volumes:
+      - a0_usr:/a0/usr
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+volumes:
+  a0_usr:
