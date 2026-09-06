@@ -22,6 +22,7 @@
 - Keep runtime desktop packages on `kali-last-snapshot`; carry the rolling base's matching ATK introspection package into that transaction, then pin the verified Python 3.13-compatible LibreOffice and complete Xpra runtime versions in `fs/ins/install_additional.sh` for both published architectures.
 - Do not bake secrets, local `.env` values, or user data into the image.
 - Runtime startup must ensure `/a0/usr/uploads` exists before supervised services start.
+- `CLAUDE_CONFIG_DIR` and `CURSOR_HOME` are set to persisted paths under `usr/` so `plugins/_oauth`'s Claude Code/Cursor CLI providers survive a container recreation; runtime startup must ensure both directories exist before supervised services start, same as `/a0/usr/uploads`.
 - Runtime startup raises the soft open-file limit toward `A0_NOFILE_LIMIT` (default `65535`) before supervisord starts, bounded by the container hard limit.
 - Self-update user-data backups skip Time Travel shadow history under `usr/.time_travel/` and transient Desktop agent state.
 - Self-update waits up to 180 seconds for the updated or restored WebUI health check by default; `A0_SELF_UPDATE_HEALTH_TIMEOUT_SECONDS` may override it.

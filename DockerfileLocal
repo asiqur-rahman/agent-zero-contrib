@@ -6,6 +6,13 @@ FROM agent0ai/agent-zero-base:latest
 ARG BRANCH=local
 ENV BRANCH=$BRANCH
 
+# Relocate the Claude Code / Cursor CLI config dirs under the one directory
+# this container persists across restarts (usr/), so a `claude auth login`
+# or `agent login` run in a `docker exec` shell survives a redeploy without
+# the user needing to export these themselves. See plugins/_oauth/README.md.
+ENV CLAUDE_CONFIG_DIR=/a0/usr/plugins/_oauth/claude_code_cli/config
+ENV CURSOR_HOME=/a0/usr/plugins/_oauth/cursor_cli/home
+
 # Copy filesystem files to root
 COPY ./docker/run/fs/ /
 # Copy current development files to git, they will only be used in "local" branch

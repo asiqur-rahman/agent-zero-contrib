@@ -52,6 +52,13 @@ cp -r --no-preserve=ownership,mode /per/* /
 # Ensure upload storage exists before API and connector callers can reference it.
 mkdir -p /a0/usr/uploads
 
+# Ensure the persisted Claude Code / Cursor CLI config dirs exist before a
+# `docker exec` shell tries to log in against them (CLAUDE_CONFIG_DIR /
+# CURSOR_HOME are set in the Dockerfile) -- otherwise the CLI's own login
+# command may fail to create a missing parent directory tree.
+mkdir -p "${CLAUDE_CONFIG_DIR:-/a0/usr/plugins/_oauth/claude_code_cli/config}"
+mkdir -p "${CURSOR_HOME:-/a0/usr/plugins/_oauth/cursor_cli/home}"
+
 # allow execution of /root/.bashrc and /root/.profile
 chmod 444 /root/.bashrc
 chmod 444 /root/.profile
