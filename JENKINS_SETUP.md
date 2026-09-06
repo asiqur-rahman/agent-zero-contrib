@@ -33,8 +33,11 @@ The `Jenkinsfile`'s `when { branch 'production' }` conditions require a **Multib
 
 1. Jenkins -> **New Item** -> **Multibranch Pipeline**
 2. Branch source: Git (or GitHub), pointed at `https://github.com/asiqur-rahman/agent-zero-contrib.git`
-3. Build configuration: **by Jenkinsfile**, path `Jenkinsfile` (default)
-4. Save -- Jenkins scans branches and creates a sub-job per branch it finds
+3. **Add a branch filter so only `production` is discovered/built** -- under that branch source, click **Add** (behavior) -> **Filter by name (with regular expression)** -> Regular expression: `^production$`. Without this, Jenkins discovers and creates a sub-job for every branch in the repo (including short-lived feature/fix branches, especially since merged branches are kept around rather than deleted -- see the repo's own branch-cleanup convention), each triggering its own build on push. The `Jenkinsfile`'s per-stage `when { branch 'production' }` guards are a defense-in-depth safety net for a build that slips through anyway (it completes near-instantly with everything skipped), not a substitute for this filter -- this filter is what actually stops the noise.
+4. Build configuration: **by Jenkinsfile**, path `Jenkinsfile` (default)
+5. Save -- Jenkins scans branches and creates a sub-job for the branches matching the filter above (just `production`)
+
+If other branches already have sub-jobs from before this filter was added, re-run **Scan Multibranch Pipeline Now** after saving -- Jenkins prunes sub-jobs for branches the filter now excludes.
 
 ## 5. Approve the getCauses() script signature
 
@@ -67,15 +70,15 @@ Both are configured, so a push is picked up near-instantly and the periodic scan
 
 ## What the pipeline actually does
 
-Every push to any branch: install, lint, build -- fully automatic, no approval needed.
+Everything below only runs on a push to `production` -- every stage (including Install/Lint/Build) is gated with `when { branch 'production' }`, and the Multibranch Pipeline job's own branch filter (step 3 above) should already stop other branches from being discovered/triggered in the first place. A build on any other branch (if one somehow still runs) completes near-instantly with everything skipped.
 
-- **Install**: creates a `.venv` in the workspace, installs `requirements.dev.txt` (which now includes `ruff`) -- not `requirements.txt`. Lint and Build below only parse/byte-compile source, never import or execute it, so the app's runtime deps (faiss-cpu, torch-via-sentence-transformers/whisper, unstructured[all-docs], ...) buy nothing here and would make every push slow and network-heavy for no reason.
-- **Lint**: `ruff check .`, scoped by `ruff.toml` to syntax errors + pyflakes, with the codebase's pre-existing pyflakes debt explicitly carved out (see that file's comments) so this starts green without a repo-wide reformat.
-- **Build**: `python -m compileall` across the tracked source trees -- a fast correctness pass, not a Docker image build.
+1. **Install**: creates a `.venv` in the workspace, installs `requirements.dev.txt` (which now includes `ruff`) -- not `requirements.txt`. Lint and Build below only parse/byte-compile source, never import or execute it, so the app's runtime deps (faiss-cpu, torch-via-sentence-transformers/whisper, unstructured[all-docs], ...) buy nothing here.
+2. **Lint**: `ruff check .`, scoped by `ruff.toml` to syntax errors + pyflakes, with the codebase's pre-existing pyflakes debt explicitly carved out (see that file's comments) so this starts green without a repo-wide reformat.
+3. **Build**: `python -m compileall` across the tracked source trees -- a fast correctness pass, not a Docker image build.
 
 `pytest` is expected to be run locally before pushing to `production`, not in CI -- matching this repo's existing GitHub Actions setup, which also doesn't run it.
 
-Push to `production` specifically, additionally:
+Then, still only on `production`:
 
 1. Suggests the next version (reads Docker Hub's existing `vX.Y` tags on `asiqurrahman/agent-zero`, bumps the minor -- same logic as `make push`, matching upstream agent-zero's own major.minor tagging with no patch component)
 2. **Opens a 5-minute review window in the Jenkins UI**, showing the suggested version (editable) before anything happens

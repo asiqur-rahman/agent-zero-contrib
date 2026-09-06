@@ -2,12 +2,22 @@
 // Requires a Multibranch Pipeline job pointed at this repo so
 // `branch 'production'`-gated stages only run for that branch.
 //
-// Every push, any branch: checkout, install, lint, build (fully automatic,
-// no approval needed). pytest is expected to be run locally before pushing,
-// not in CI -- matching this repo's existing GitHub Actions setup, which
-// also doesn't run pytest (see .github/workflows/docker-publish.yml).
+// production branch ONLY: every stage below (checkout, install, lint,
+// build, and the Docker Hub push) is gated with `when { branch
+// 'production' }`. A push to any other branch runs no stages at all --
+// this is deliberate: the Jenkins job's own Branch Sources config should
+// already restrict discovery/triggering to `production` only (see
+// JENKINS_SETUP.md's "Filter by name" step), and these per-stage `when`s
+// are a cheap defense-in-depth safety net in case that filter is ever
+// missing, misconfigured, or a branch slips through some other way --
+// such a build completes near-instantly with everything skipped rather
+// than actually running Install/Lint/Build's containers.
 //
-// production branch only: a 5-minute review window pauses the pipeline in
+// pytest is expected to be run locally before pushing, not in CI --
+// matching this repo's existing GitHub Actions setup, which also doesn't
+// run pytest (see .github/workflows/docker-publish.yml).
+//
+// production branch: a 5-minute review window pauses the pipeline in
 // the Jenkins UI before anything is pushed to Docker Hub. Clicking Push
 // approves immediately; clicking Abort explicitly declines and skips the
 // push. Letting the window lapse with no response auto-approves with the
@@ -77,6 +87,9 @@ pipeline {
       // containerized (the other setup this pipeline supports -- see
       // JENKINS_SETUP.md), that mount lookup returns nothing and
       // $WORKSPACE is already a real host path, so it's used as-is.
+      when {
+        branch 'production'
+      }
       steps {
         script {
           env.HOST_WORKSPACE = sh(
@@ -97,6 +110,9 @@ pipeline {
     }
 
     stage('Install') {
+      when {
+        branch 'production'
+      }
       steps {
         // Only requirements.dev.txt (ruff, pytest, pyinstrument) -- NOT
         // requirements.txt. Lint (ruff) and Build (compileall) below only
@@ -128,6 +144,9 @@ pipeline {
     }
 
     stage('Lint') {
+      when {
+        branch 'production'
+      }
       steps {
         // Rule selection and the pre-existing-debt ignore list live in
         // ruff.toml, not here -- see that file for why.
@@ -142,6 +161,9 @@ pipeline {
     }
 
     stage('Build') {
+      when {
+        branch 'production'
+      }
       steps {
         // "Build" here means a fast correctness pass (byte-compile every
         // tracked source tree, catching syntax errors) -- NOT a Docker
