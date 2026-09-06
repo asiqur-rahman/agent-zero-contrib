@@ -24,10 +24,12 @@ PERSISTED_HOME_PATH = "/a0/usr/plugins/_oauth/command_code_cli/home"
 NOT_DRIVEN_MESSAGE = (
     "Command Code sign-in is not driven from Agent Zero. On the machine "
     "running Agent Zero, install the CLI (npm i -g command-code) and run "
-    "`command-code login` yourself, then click Refresh here. To keep this "
-    "session across container restarts/updates, run the login with: "
-    f'HOME="{PERSISTED_HOME_PATH}" command-code login '
-    "-- otherwise the login is lost the next time the container is recreated."
+    "`command-code login` yourself, then click Refresh here. The shipped "
+    f"Docker image's docker exec shell already exports HOME={PERSISTED_HOME_PATH} "
+    "(see /root/.bashrc), so a plain `command-code login` there persists "
+    "correctly on its own -- only pass a HOME override yourself if running "
+    "natively outside Docker, or from a non-interactive shell that skips "
+    "/root/.bashrc."
 )
 
 
@@ -143,11 +145,12 @@ class CommandCodeOAuthProvider:
             "disconnected": False,
             "note": (
                 "Agent Zero cannot sign Command Code out remotely -- it never "
-                "held the credential. Run "
-                f'HOME="{PERSISTED_HOME_PATH}" command-code logout '
-                "in a terminal on the machine running Agent Zero to sign out "
-                "(use the same HOME override the login used, or logout will "
-                "target the wrong session)."
+                "held the credential. Run `command-code logout` in a "
+                "docker exec shell on the machine running Agent Zero to sign "
+                f"out (it already exports HOME={PERSISTED_HOME_PATH}, same as "
+                "login -- use the same HOME override yourself if running "
+                "outside a docker exec shell, or logout will target the "
+                "wrong session)."
             ),
         }
 

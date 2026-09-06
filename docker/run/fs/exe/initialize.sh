@@ -59,6 +59,12 @@ mkdir -p /a0/usr/uploads
 mkdir -p "${CLAUDE_CONFIG_DIR:-/a0/usr/plugins/_oauth/claude_code_cli/config}"
 mkdir -p "${CURSOR_HOME:-/a0/usr/plugins/_oauth/cursor_cli/home}"
 
+# Same for Command Code CLI's relocated HOME (exported in /root/.bashrc and
+# /root/.profile, not a Dockerfile ENV -- see those files for why), so
+# `command-code login` in a fresh docker exec shell doesn't fail against a
+# missing parent directory tree.
+mkdir -p /a0/usr/plugins/_oauth/command_code_cli/home
+
 # allow execution of /root/.bashrc and /root/.profile
 chmod 444 /root/.bashrc
 chmod 444 /root/.profile
