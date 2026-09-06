@@ -19,10 +19,20 @@
                     <div class="projects-form-group">
                         <label class="projects-form-label">Git Repository (optional)</label>
                         <span class="projects-form-description">Clone from an existing git repository. Leave empty to create an empty project.</span>
-                        <input class="projects-form-input" type="text" 
-                            x-model="$store.projects.selectedProject.git_url"
-                            :disabled="$store.projects.selectedProject._cloning"
-                            placeholder="https://github.com/user/repo.git">
+                        <div class="projects-git-repo-row">
+                            <select class="projects-form-select projects-git-provider-select"
+                                x-model="$store.projects.selectedProject.git_provider"
+                                :disabled="$store.projects.selectedProject._cloning">
+                                <option value="github">GitHub</option>
+                                <option value="gitlab">GitLab</option>
+                                <option value="bitbucket">Bitbucket</option>
+                                <option value="custom">Custom Git</option>
+                            </select>
+                            <input class="projects-form-input" type="text"
+                                x-model="$store.projects.selectedProject.git_url"
+                                :disabled="$store.projects.selectedProject._cloning"
+                                placeholder="https://github.com/user/repo.git">
+                        </div>
                     </div>
 
                     <template x-if="$store.projects.selectedProject.git_url && $store.projects.selectedProject.git_url.trim()">
@@ -97,6 +107,20 @@
     .button:disabled {
         opacity: 0.6;
         cursor: not-allowed;
+    }
+
+    .projects-git-repo-row {
+        display: flex;
+        gap: 0.5em;
+    }
+
+    .projects-git-provider-select {
+        flex: 0 0 auto;
+        width: auto;
+    }
+
+    .projects-git-repo-row .projects-form-input {
+        flex: 1 1 auto;
     }
 </style>
 

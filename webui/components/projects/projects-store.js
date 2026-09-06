@@ -164,6 +164,7 @@ const model = {
           git_url: project.git_url,
           include_agents_md: project.include_agents_md !== false,
           git_token: project.git_token || "",
+          git_provider: project.git_provider || "github",
           llm: project.llm || null,
         },
       });
@@ -415,6 +416,7 @@ const model = {
       color: "",
       git_url: "",
       git_token: "",
+      git_provider: "github",
     };
   },
 
