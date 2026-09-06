@@ -64,6 +64,7 @@ from plugins._oauth.helpers.providers.base import (
     CLAUDE_CODE_PROVIDER_ID,
     CODEX_PROVIDER_ID,
     COMMAND_CODE_PROVIDER_ID,
+    CURSOR_PROVIDER_ID,
     DUMMY_API_KEY,
     GEMINI_API_PROVIDER_ID,
     GITHUB_COPILOT_PROVIDER_ID,
@@ -96,6 +97,7 @@ def test_registry_exposes_initial_oauth_providers():
         XAI_GROK_PROVIDER_ID,
         COMMAND_CODE_PROVIDER_ID,
         CLAUDE_CODE_PROVIDER_ID,
+        CURSOR_PROVIDER_ID,
     ]
     assert registry[CODEX_PROVIDER_ID].metadata().display_name == "Codex/ChatGPT"
     assert registry[GITHUB_COPILOT_PROVIDER_ID].metadata().model_provider_id == GITHUB_COPILOT_PROVIDER_ID
@@ -103,6 +105,7 @@ def test_registry_exposes_initial_oauth_providers():
     assert registry[XAI_GROK_PROVIDER_ID].metadata().auth_flow == "browser_pkce"
     assert registry[COMMAND_CODE_PROVIDER_ID].metadata().auth_flow == "external_cli"
     assert registry[CLAUDE_CODE_PROVIDER_ID].metadata().auth_flow == "external_cli"
+    assert registry[CURSOR_PROVIDER_ID].metadata().auth_flow == "external_cli"
 
 
 def test_get_provider_rejects_unknown_provider_id():
@@ -790,6 +793,7 @@ def test_model_provider_config_contains_all_oauth_providers():
         XAI_GROK_PROVIDER_ID,
         COMMAND_CODE_PROVIDER_ID,
         CLAUDE_CODE_PROVIDER_ID,
+        CURSOR_PROVIDER_ID,
     }
     assert "api_key" not in chat[CODEX_PROVIDER_ID]["kwargs"]
     assert "api_key" not in chat[GITHUB_COPILOT_PROVIDER_ID]["kwargs"]
@@ -797,6 +801,7 @@ def test_model_provider_config_contains_all_oauth_providers():
     assert "api_key" not in chat[XAI_GROK_PROVIDER_ID]["kwargs"]
     assert "api_key" not in chat[COMMAND_CODE_PROVIDER_ID]["kwargs"]
     assert "api_key" not in chat[CLAUDE_CODE_PROVIDER_ID]["kwargs"]
+    assert "api_key" not in chat[CURSOR_PROVIDER_ID]["kwargs"]
     assert chat[CODEX_PROVIDER_ID]["kwargs"]["api_base"] == "http://127.0.0.1/oauth/codex/v1"
     assert (
         chat[GITHUB_COPILOT_PROVIDER_ID]["kwargs"]["api_base"]
