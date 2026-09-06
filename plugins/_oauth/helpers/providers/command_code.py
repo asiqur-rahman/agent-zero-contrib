@@ -19,10 +19,15 @@ CURATED_MODELS = [
     "google/gemini-3-pro",
 ]
 
+PERSISTED_HOME_PATH = "/a0/usr/plugins/_oauth/command_code_cli/home"
+
 NOT_DRIVEN_MESSAGE = (
     "Command Code sign-in is not driven from Agent Zero. On the machine "
     "running Agent Zero, install the CLI (npm i -g command-code) and run "
-    "`command-code login` yourself, then click Refresh here."
+    "`command-code login` yourself, then click Refresh here. To keep this "
+    "session across container restarts/updates, run the login with: "
+    f'HOME="{PERSISTED_HOME_PATH}" command-code login '
+    "-- otherwise the login is lost the next time the container is recreated."
 )
 
 
@@ -138,8 +143,11 @@ class CommandCodeOAuthProvider:
             "disconnected": False,
             "note": (
                 "Agent Zero cannot sign Command Code out remotely -- it never "
-                "held the credential. Run `command-code logout` in a terminal "
-                "on the machine running Agent Zero to sign out."
+                "held the credential. Run "
+                f'HOME="{PERSISTED_HOME_PATH}" command-code logout '
+                "in a terminal on the machine running Agent Zero to sign out "
+                "(use the same HOME override the login used, or logout will "
+                "target the wrong session)."
             ),
         }
 

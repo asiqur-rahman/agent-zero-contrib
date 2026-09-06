@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from plugins._oauth.helpers.providers.base import (
+    CLAUDE_CODE_PROVIDER_ID,
     CODEX_PROVIDER_ID,
     COMMAND_CODE_PROVIDER_ID,
     DUMMY_API_KEY,
@@ -26,6 +27,7 @@ from plugins._oauth.helpers.providers.registry import (
 )
 
 __all__ = [
+    "CLAUDE_CODE_PROVIDER_ID",
     "CODEX_PROVIDER_ID",
     "COMMAND_CODE_PROVIDER_ID",
     "DUMMY_API_KEY",

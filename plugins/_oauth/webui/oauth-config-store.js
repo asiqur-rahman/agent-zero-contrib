@@ -22,6 +22,7 @@ const PROVIDER_MARKS = {
   openai: "key",
   xai: "neurology",
   command_code: "smart_toy",
+  claude_code: "auto_awesome",
 };
 const MODEL_SLOTS = [
   {
