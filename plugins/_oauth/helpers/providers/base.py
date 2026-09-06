@@ -15,6 +15,7 @@ GEMINI_API_PROVIDER_ID = "gemini_api_oauth"
 XAI_GROK_PROVIDER_ID = "xai_grok_oauth"
 COMMAND_CODE_PROVIDER_ID = "command_code_cli"
 CLAUDE_CODE_PROVIDER_ID = "claude_code_cli"
+CURSOR_PROVIDER_ID = "cursor_cli"
 DUMMY_API_KEY = "oauth"
 
 

@@ -23,6 +23,7 @@ const PROVIDER_MARKS = {
   xai: "neurology",
   command_code: "smart_toy",
   claude_code: "auto_awesome",
+  cursor_cli: "arrow_selector_tool",
 };
 const MODEL_SLOTS = [
   {

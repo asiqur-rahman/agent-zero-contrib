@@ -64,3 +64,6 @@ command_code:
 
 claude_code:
   enabled: true
+
+cursor_cli:
+  enabled: true

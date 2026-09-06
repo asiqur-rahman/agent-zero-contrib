@@ -59,9 +59,19 @@ OAuth-backed model providers do not require users to enter API keys. Agent Zero 
 - Each chat completion is a fresh, stateless `claude -p` invocation (no `--resume`/`--continue`), matching how Agent Zero sends its full conversation state on every call regardless of backend.
 - "Disconnect" deletes the `.credentials.json` under this plugin's own config dir -- safe here (unlike Command Code) because that directory is exclusively owned by this plugin, not shared system-wide.
 
+### Cursor CLI (`cursor_cli`)
+
+- Cursor CLI (https://cursor.com/cli) also publishes no third-party OAuth/REST API, so this follows the same external-CLI pattern -- it shells out to the locally installed `agent` binary using the headless contract confirmed in `plugins/_orchestrator/skills/orchestrator/references/cursor.md`: `agent -p --output-format text "<prompt>"`.
+- **Unlike Command Code and Claude Code, this provider never auto-installs the CLI**, even on "Connect". Cursor's official installer is `curl https://cursor.com/install -fsS | bash` -- an unscoped shell script piped from a URL, not a scoped package-manager install like `npm install -g <package>` -- so it is never run automatically. Install it yourself, then run `CURSOR_HOME="/a0/usr/plugins/_oauth/cursor_cli/home" NO_OPEN_BROWSER=1 agent login` (or set `CURSOR_API_KEY`/`API_KEY_CURSOR`), then click Refresh in this settings page.
+- Uses Cursor CLI's native `CURSOR_HOME` override to point its credential home at `usr/plugins/_oauth/cursor_cli/home` -- like Claude Code, this survives a container recreation from the start (no workaround needed, unlike Command Code).
+- Auth state is detected the same way `plugins/_orchestrator/helpers/adapters/cursor.py` already does: `CURSOR_API_KEY`/`API_KEY_CURSOR` env vars, or a secret-shaped credential file under that home -- there is no documented `agent status --json` to parse.
+- Cursor CLI selects models via its own interactive `/model` command, not a CLI flag this provider could drive per-request, so `models()` always returns a single `"auto"` placeholder rather than a fake selectable list.
+- Completions use `--output-format text`, not `--output-format json` -- there is no confirmed JSON result schema for this CLI to parse against (unlike Command Code and Claude Code, both verified against real CLI output), so usage stats are always empty.
+- "Disconnect" removes any of the known credential file names found under this plugin's own `CURSOR_HOME` -- safe here for the same reason as Claude Code.
+
 ## Usage Plan Metadata
 
-The status API exposes `usage_plan_catalog` for subscription and billing context. It covers only connectable providers: Codex, GitHub Copilot, Google Cloud Gemini, and xAI Grok. Command Code and Claude Code are not included -- their billing/tier metadata isn't published anywhere this plugin can read.
+The status API exposes `usage_plan_catalog` for subscription and billing context. It covers only connectable providers: Codex, GitHub Copilot, Google Cloud Gemini, and xAI Grok. Command Code, Claude Code, and Cursor CLI are not included -- their billing/tier metadata isn't published anywhere this plugin can read.
 
 The same status response also includes `oauth_accounts`, a compact summary used by the settings modal, welcome discovery card, and onboarding wizard. Keep that summary provider-registry driven so new OAuth providers appear consistently across those surfaces.
 

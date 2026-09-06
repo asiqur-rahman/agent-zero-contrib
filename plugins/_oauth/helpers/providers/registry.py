@@ -10,6 +10,7 @@ from plugins._oauth.helpers.providers.codex import CodexOAuthProvider
 def provider_registry() -> dict[str, OAuthProvider]:
     from plugins._oauth.helpers.providers.claude_code import ClaudeCodeOAuthProvider
     from plugins._oauth.helpers.providers.command_code import CommandCodeOAuthProvider
+    from plugins._oauth.helpers.providers.cursor import CursorCliOAuthProvider
     from plugins._oauth.helpers.providers.gemini_api import GeminiApiOAuthProvider
     from plugins._oauth.helpers.providers.github_copilot import GitHubCopilotOAuthProvider
     from plugins._oauth.helpers.providers.xai_grok import XaiGrokOAuthProvider
@@ -21,6 +22,7 @@ def provider_registry() -> dict[str, OAuthProvider]:
         XaiGrokOAuthProvider(),
         CommandCodeOAuthProvider(),
         ClaudeCodeOAuthProvider(),
+        CursorCliOAuthProvider(),
     ]
     return {provider.provider_id: provider for provider in providers}
 

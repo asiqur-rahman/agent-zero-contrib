@@ -12,6 +12,7 @@ from plugins._oauth.helpers.config import codex_config
 from plugins._oauth.helpers.providers import (
     CLAUDE_CODE_PROVIDER_ID,
     COMMAND_CODE_PROVIDER_ID,
+    CURSOR_PROVIDER_ID,
     GEMINI_API_PROVIDER_ID,
     GITHUB_COPILOT_PROVIDER_ID,
     XAI_GROK_PROVIDER_ID,
@@ -589,6 +590,138 @@ def _stream_claude_code_completion(text: str, model: str):
     # claude_code_cli.run_prompt() blocks until the CLI's single terminal
     # result object, so there is no incremental text to relay -- same
     # non-incremental-but-valid SSE shape as _stream_command_code_completion().
+    created = int(time.time())
+    chunk_id = f"chatcmpl_{int(time.time() * 1000)}"
+
+    def generate():
+        yield _sse_data(
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": text},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
+        yield _sse_data(
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+        )
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"},
+    )
+
+
+def cursor_cli_health():
+    return jsonify(
+        {
+            "ok": True,
+            "provider": CURSOR_PROVIDER_ID,
+            "base_path": "/oauth/cursor-cli",
+        }
+    )
+
+
+def cursor_cli_models():
+    if request.method == "OPTIONS":
+        return _options_response()
+    denied = _proxy_denied_response()
+    if denied:
+        return denied
+
+    provider = get_provider(CURSOR_PROVIDER_ID)
+    return jsonify(
+        {
+            "object": "list",
+            "data": [
+                {
+                    "id": model,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "cursor-cli",
+                }
+                for model in provider.models()
+            ],
+        }
+    )
+
+
+def cursor_cli_chat_completions():
+    if request.method == "OPTIONS":
+        return _options_response()
+    denied = _proxy_denied_response()
+    if denied:
+        return denied
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _json_error("Request body must be a JSON object.")
+
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return _json_error("Request body must include a `messages` array.")
+
+    from plugins._oauth.helpers import cursor_cli
+
+    model = str(body.get("model") or "").strip() or None
+    result = cursor_cli.run_prompt(messages, model=model)
+
+    if not result.get("ok"):
+        return _json_error(
+            result.get("error") or "Cursor CLI run failed.",
+            status=502,
+            code="upstream_error",
+        )
+
+    text = str(result.get("text") or "")
+    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    response_model = str(body.get("model") or model or "")
+
+    if body.get("stream") is True:
+        return _stream_cursor_cli_completion(text, response_model)
+
+    return jsonify(
+        {
+            "id": f"chatcmpl_{int(time.time() * 1000)}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": response_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            },
+        }
+    )
+
+
+def _stream_cursor_cli_completion(text: str, model: str):
+    # cursor_cli.run_prompt() blocks until the CLI exits, so there is no
+    # incremental text to relay -- same non-incremental-but-valid SSE shape
+    # as _stream_command_code_completion()/_stream_claude_code_completion().
     created = int(time.time())
     chunk_id = f"chatcmpl_{int(time.time() * 1000)}"
 
