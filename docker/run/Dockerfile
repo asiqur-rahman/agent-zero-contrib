@@ -8,12 +8,16 @@ ARG BRANCH
 RUN if [ -z "$BRANCH" ]; then echo "ERROR: BRANCH is not set!" >&2; exit 1; fi
 ENV BRANCH=$BRANCH
 
-# Relocate the Claude Code / Cursor CLI config dirs under the one directory
-# this container persists across restarts (usr/), so a `claude auth login`
-# or `agent login` run in a `docker exec` shell survives a redeploy without
-# the user needing to export these themselves. See plugins/_oauth/README.md.
+# Relocate Claude Code's config dir under the one directory this container
+# persists across restarts (usr/), so `claude auth login` run in a
+# `docker exec` shell survives a redeploy without the user needing to
+# export this themselves. See plugins/_oauth/README.md.
+#
+# Cursor CLI has no equivalent scoped override -- confirmed live against
+# the real CLI, it ignores CURSOR_HOME entirely and always writes to
+# $HOME/.cursor. That relocation is done in /root/.bashrc/.profile instead
+# (shared with Command Code's own HOME relocation there), not here.
 ENV CLAUDE_CONFIG_DIR=/a0/usr/plugins/_oauth/claude_code_cli/config
-ENV CURSOR_HOME=/a0/usr/plugins/_oauth/cursor_cli/home
 
 # Copy filesystem files to root
 COPY ./fs/ /

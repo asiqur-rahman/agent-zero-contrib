@@ -27,7 +27,7 @@ def test_is_installed_true_when_version_exits_zero(monkeypatch):
     monkeypatch.setattr(
         cursor_cli.subprocess,
         "run",
-        lambda *a, **k: FakeCompletedProcess(0, "2026.09.01\n"),
+        lambda *a, **k: FakeCompletedProcess(0, "2026.09.02-c22c1a3\n"),
     )
     assert cursor_cli.is_installed() is True
 
@@ -50,7 +50,7 @@ def test_get_status_reports_not_installed(monkeypatch):
 
 def test_get_status_authenticated_via_cursor_api_key(monkeypatch):
     monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
-    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.01")
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setenv("CURSOR_API_KEY", "fake-key")
 
@@ -61,7 +61,7 @@ def test_get_status_authenticated_via_cursor_api_key(monkeypatch):
 
 def test_get_status_authenticated_via_api_key_cursor_fallback_var(monkeypatch):
     monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
-    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.01")
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.setenv("API_KEY_CURSOR", "fake-key")
 
@@ -70,23 +70,48 @@ def test_get_status_authenticated_via_api_key_cursor_fallback_var(monkeypatch):
     assert "API_KEY_CURSOR" in status["user"]
 
 
-def test_get_status_authenticated_via_credentials_file(monkeypatch, tmp_path):
+def test_get_status_authenticated_via_real_cli_config_shape(monkeypatch, tmp_path):
+    # Shape confirmed against the real installed CLI (v2026.09.02-c22c1a3):
+    # a logged-in session populates authInfo in cli-config.json -- there is
+    # no separate token file.
     monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
-    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.01")
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
 
-    (tmp_path / "auth.json").write_text('{"access_token":"fake"}')
+    config = tmp_path / "cli-config.json"
+    config.write_text(
+        '{"version":1,"authInfo":{"userId":325785915,"email":"user@example.com",'
+        '"displayName":"Example User","authId":"auth0|user_fake"}}'
+    )
 
     status = cursor_cli.get_status()
     assert status["authenticated"] is True
-    assert status["version"] == "2026.09.01"
+    assert status["version"] == "2026.09.02-c22c1a3"
+    assert status["user"] == "user@example.com"
 
 
-def test_get_status_not_authenticated_when_no_credentials(monkeypatch, tmp_path):
+def test_get_status_not_authenticated_when_config_has_no_auth_info(monkeypatch, tmp_path):
+    # Shape confirmed against the real CLI before login: cli-config.json
+    # exists (default settings) but has no authInfo key at all.
     monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
-    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.01")
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.delenv("API_KEY_CURSOR", raising=False)
+    monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
+
+    config = tmp_path / "cli-config.json"
+    config.write_text('{"version":1,"notifications":true}')
+
+    status = cursor_cli.get_status()
+    assert status["authenticated"] is False
+    assert "agent login" in status["error"]
+
+
+def test_get_status_not_authenticated_when_no_config_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
@@ -97,9 +122,6 @@ def test_get_status_not_authenticated_when_no_credentials(monkeypatch, tmp_path)
 
 
 def test_list_models_is_always_empty_no_selection_flag():
-    # Cursor CLI selects models via its own /model command, not a CLI flag
-    # this provider can drive -- always empty, so the provider falls back
-    # to its single-entry curated placeholder.
     assert cursor_cli.list_models() == []
 
 
@@ -128,7 +150,6 @@ def test_run_prompt_uses_plain_text_output_and_ignores_model(monkeypatch):
     assert args[0] == "agent"
     assert args[1] == "-p"
     assert "--output-format" in args and "text" in args
-    # model is intentionally never turned into a CLI flag
     assert "gpt-5.1" not in args
     assert "[System]\nBe terse." in args[-1]
     assert "[User]\nSay hi" in args[-1]
@@ -198,20 +219,18 @@ def test_start_login_never_installs_or_authenticates(monkeypatch):
     assert "curl https://cursor.com/install" in result.error
 
 
-def test_provider_disconnect_removes_owned_credential_files(monkeypatch, tmp_path):
+def test_provider_disconnect_removes_owned_config_file(monkeypatch, tmp_path):
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
 
-    (tmp_path / "auth.json").write_text('{"access_token":"fake"}')
-    (tmp_path / "token.json").write_text('{"token":"fake"}')
+    config = tmp_path / "cli-config.json"
+    config.write_text('{"authInfo":{"userId":1,"email":"user@example.com"}}')
 
     provider = CursorCliOAuthProvider()
     result = provider.disconnect()
     assert result["disconnected"] is True
-    assert set(result["removed"]) == {"auth.json", "token.json"}
-    assert not (tmp_path / "auth.json").exists()
-    assert not (tmp_path / "token.json").exists()
+    assert not config.exists()
 
 
 def test_provider_disconnect_refuses_when_env_api_key_set(monkeypatch):
@@ -226,7 +245,12 @@ def test_provider_status_reports_installed_and_authenticated(monkeypatch):
     monkeypatch.setattr(
         cursor_cli,
         "get_status",
-        lambda: {"installed": True, "authenticated": True, "version": "2026.09.01", "user": "Authenticated"},
+        lambda: {
+            "installed": True,
+            "authenticated": True,
+            "version": "2026.09.02-c22c1a3",
+            "user": "user@example.com",
+        },
     )
     provider = CursorCliOAuthProvider()
     status = provider.status()
@@ -239,7 +263,12 @@ def test_provider_status_surfaces_error_when_not_connected(monkeypatch):
     monkeypatch.setattr(
         cursor_cli,
         "get_status",
-        lambda: {"installed": True, "authenticated": False, "version": "2026.09.01", "error": "Not authenticated."},
+        lambda: {
+            "installed": True,
+            "authenticated": False,
+            "version": "2026.09.02-c22c1a3",
+            "error": "Not authenticated.",
+        },
     )
     provider = CursorCliOAuthProvider()
     status = provider.status()

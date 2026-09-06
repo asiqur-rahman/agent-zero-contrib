@@ -19,7 +19,12 @@ from plugins._oauth.helpers.providers.base import (
 # through whichever model Cursor CLI itself is currently configured to use.
 CURATED_MODELS = ["auto"]
 
-PERSISTED_HOME_PATH = "/a0/usr/plugins/_oauth/cursor_cli/home"
+# Confirmed live against the real CLI: Cursor does NOT respect a
+# CURSOR_HOME override, it always writes to $HOME/.cursor. This is the
+# same shared, persisted HOME directory command_code_cli.py already uses
+# (see cursor_cli.py's module docstring for why) -- not a cursor-specific
+# path, despite the name.
+PERSISTED_HOME_PATH = "/a0/usr/plugins/_oauth/command_code_cli/home"
 INSTALL_HINT = "curl https://cursor.com/install -fsS | bash"
 
 NOT_DRIVEN_MESSAGE = (
@@ -28,12 +33,13 @@ NOT_DRIVEN_MESSAGE = (
     f"its installer ({INSTALL_HINT}) is a raw shell script piped from a "
     "URL, not a scoped package-manager install, so it is never run "
     f"automatically. On the machine running Agent Zero: install with "
-    f"`{INSTALL_HINT}`, then sign in with `NO_OPEN_BROWSER=1 agent login` "
-    "(or set CURSOR_API_KEY/API_KEY_CURSOR), then click Refresh here. The "
-    f"shipped Docker image already sets CURSOR_HOME={PERSISTED_HOME_PATH}, "
-    "so a plain `agent login` in a `docker exec` shell persists correctly "
-    "on its own -- only export CURSOR_HOME yourself if running natively "
-    "outside Docker."
+    f"`{INSTALL_HINT}`, then sign in with `agent` or `NO_OPEN_BROWSER=1 "
+    "agent login` (or set CURSOR_API_KEY/API_KEY_CURSOR), then click "
+    "Refresh here. A `docker exec` shell already persists this correctly "
+    "on its own (this container's shell exports HOME to a persisted path "
+    "for exactly this reason, since Cursor CLI itself only honors $HOME, "
+    f"not CURSOR_HOME) -- only export HOME=\"{PERSISTED_HOME_PATH}\" "
+    "yourself if running natively outside Docker."
 )
 
 
@@ -113,10 +119,10 @@ class CursorCliOAuthProvider:
         return models or list(CURATED_MODELS)
 
     def disconnect(self) -> dict[str, Any]:
-        # Like Claude Code (and unlike Command Code), this provider points
-        # CURSOR_HOME at a directory it owns exclusively
-        # (usr/plugins/_oauth/cursor_cli/home), so it is safe to remove any
-        # credential files found there directly.
+        # The shared HOME directory is not exclusively ours (Command Code
+        # keeps its own dotfiles there too, see PERSISTED_HOME_PATH above),
+        # but Cursor's own `.cursor/` subdirectory under it is -- safe to
+        # remove just that.
         from plugins._oauth.helpers import cursor_cli
 
         env_var = next(
@@ -129,16 +135,10 @@ class CursorCliOAuthProvider:
                 "note": f"{env_var} is set in the environment. Unset it to sign out.",
             }
 
-        home = cursor_cli.credentials_home()
-        removed = []
-        for relative in cursor_cli.AUTH_FILES:
-            path = home / relative
-            if path.exists():
-                path.unlink()
-                removed.append(relative)
-
-        if removed:
-            return {"disconnected": True, "removed": removed}
+        path = cursor_cli.config_path()
+        if path.exists():
+            path.unlink()
+            return {"disconnected": True}
         return {"disconnected": False, "note": "No Cursor CLI credentials found."}
 
     def api_key(self) -> str:
