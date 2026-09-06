@@ -61,3 +61,6 @@ xai_grok:
 
 command_code:
   enabled: true
+
+claude_code:
+  enabled: true

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 from typing import Any
 
 # Command Code (https://commandcode.ai) has no published REST/OAuth API --
@@ -18,6 +19,39 @@ VERSION_TIMEOUT_SECONDS = 5
 STATUS_TIMEOUT_SECONDS = 8
 RUN_TIMEOUT_SECONDS = 300
 INSTALL_TIMEOUT_SECONDS = 180
+
+
+def _persisted_home() -> Path:
+    # command-code has no documented config-dir override (unlike Claude
+    # Code's CLAUDE_CONFIG_DIR, see claude_code_cli.py) -- it always reads
+    # its session from `~/.commandcode`, i.e. whatever $HOME resolves to.
+    # The container's writable layer outside usr/ (this plugin's own
+    # persisted directory, see provider_data_dir()) does not survive a
+    # container recreation, so a login under the default $HOME (typically
+    # /root) is lost on every image update/redeploy -- this is the confirmed
+    # cause of Command Code repeatedly showing disconnected. Overriding HOME
+    # to a path under usr/ for every command-code invocation fixes that,
+    # but only once the user re-runs `command-code login` under the SAME
+    # override (see README) -- a prior /root/.commandcode session is not
+    # migrated automatically.
+    from plugins._oauth.helpers.providers.base import COMMAND_CODE_PROVIDER_ID, provider_data_dir
+
+    home = provider_data_dir(COMMAND_CODE_PROVIDER_ID) / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def _cli_env() -> dict[str, str]:
+    env = {**os.environ, "NO_COLOR": "1"}
+    try:
+        env["HOME"] = str(_persisted_home())
+    except Exception:
+        # provider_data_dir() imports the full Agent Zero `helpers.files`
+        # module, which is not available in isolated unit-test runs -- fall
+        # back to the unmodified environment (no persisted HOME override)
+        # rather than failing the whole CLI call over it.
+        pass
+    return env
 
 
 def npm_available() -> bool:
@@ -107,7 +141,7 @@ def get_status() -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=STATUS_TIMEOUT_SECONDS,
-            env={**os.environ, "NO_COLOR": "1"},
+            env=_cli_env(),
         )
     except subprocess.TimeoutExpired:
         return {
@@ -164,6 +198,7 @@ def list_models() -> list[str]:
             capture_output=True,
             text=True,
             timeout=STATUS_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -217,7 +252,9 @@ def run_prompt(
         args.extend(["-m", model])
 
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout, env=_cli_env()
+        )
     except subprocess.TimeoutExpired:
         return {
             "ok": False,
