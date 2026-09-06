@@ -13,69 +13,72 @@ from typing import Any
 # plugins/_orchestrator/skills/orchestrator/references/cursor.md:
 # `agent -p --output-format text "<prompt>"`.
 #
-# Unlike Command Code (npm) and Claude Code (npm), Cursor CLI's official
-# installer is `curl https://cursor.com/install -fsS | bash` -- an
-# unscoped remote shell script, not a package-manager install. This
-# provider deliberately never runs that automatically, even on "Connect"
-# (npm install -g <package> is a scoped, registry-mediated install this
-# plugin is comfortable automating; piping an arbitrary downloaded script
-# into a shell is not). Install and login are always manual here.
+# IMPORTANT, confirmed live against the real CLI (v2026.09.02-c22c1a3):
+# Cursor CLI does NOT respect a CURSOR_HOME override -- it always writes
+# its config to `$HOME/.cursor/cli-config.json`, regardless of any
+# CURSOR_HOME env var (this contradicts the assumption this module
+# originally copied from plugins/_orchestrator/helpers/adapters/cursor.py,
+# which itself has not been verified against a real CLI session). Since
+# only $HOME actually relocates Cursor's config, and Command Code (see
+# command_code_cli.py) already needs the exact same kind of $HOME
+# relocation for the exact same reason (no scoped override exists for it
+# either), this module shares Command Code's persisted HOME directory
+# rather than maintaining a second one -- both tools' dotfiles
+# (~/.commandcode, ~/.cursor) simply live side by side under it, the same
+# way a real $HOME holds many tools' dotfiles at once. /root/.bashrc and
+# /root/.profile export HOME to this same shared path for interactive
+# `docker exec` logins (see docker/run/fs/per/root/).
 #
-# Auth is detected the same way plugins/_orchestrator/helpers/adapters/
-# cursor.py already does -- CURSOR_API_KEY/API_KEY_CURSOR env vars, or a
-# secret-shaped credential file under the CLI's home -- because `agent
-# status` has no documented machine-readable (--json) contract to parse.
-#
-# Cursor CLI natively supports CURSOR_HOME to relocate that home
-# directory (confirmed by the same orchestrator adapter), so -- like
-# Claude Code and unlike Command Code -- this provider can point it at a
-# directory under usr/ from the start and have logins survive a container
-# recreation without a workaround.
+# The real cli-config.json has no separate token/secret field to scan for
+# -- a logged-in session populates a top-level `authInfo` object with
+# `userId`/`email`/`displayName`/`authId`. That is the only confirmed,
+# reliable "are we logged in" signal for this CLI.
 CURSOR_BINARY = "agent"
 INSTALL_HINT = "curl https://cursor.com/install -fsS | bash"
 VERSION_TIMEOUT_SECONDS = 5
 RUN_TIMEOUT_SECONDS = 300
 
-_SECRET_KEYS = {"access_token", "api_key", "id_token", "refresh_token", "token"}
-AUTH_FILES = (
-    "auth.json",
-    "credentials.json",
-    "token.json",
-    "agent/auth.json",
-    "agent/credentials.json",
-    "agent/token.json",
-)
 
+def _shared_cli_home() -> Path:
+    # Same directory command_code_cli._persisted_home() computes -- see
+    # the module docstring for why this is intentionally shared, not a
+    # cursor-specific path.
+    from plugins._oauth.helpers.providers.base import COMMAND_CODE_PROVIDER_ID, provider_data_dir
 
-def _persisted_home() -> Path:
-    from plugins._oauth.helpers.providers.base import CURSOR_PROVIDER_ID, provider_data_dir
-
-    home = provider_data_dir(CURSOR_PROVIDER_ID) / "home"
+    home = provider_data_dir(COMMAND_CODE_PROVIDER_ID) / "home"
     home.mkdir(parents=True, exist_ok=True)
     return home
 
 
 def _fallback_home() -> Path:
-    # Same default plugins/_orchestrator/helpers/adapters/cursor.py falls
-    # back to when no override is set -- used only if the persisted
-    # provider_data_dir() path is unavailable (e.g. an isolated unit test
-    # without the full Agent Zero `helpers.files` module loaded).
-    configured = os.environ.get("CURSOR_HOME", "").strip()
-    return Path(configured).expanduser() if configured else Path.home() / ".cursor"
+    # Used only if the persisted provider_data_dir() path is unavailable
+    # (e.g. an isolated unit test without the full Agent Zero
+    # `helpers.files` module loaded) -- falls back to whatever $HOME
+    # already resolves to for this process.
+    return Path.home()
 
 
 def credentials_home() -> Path:
     try:
-        return _persisted_home()
+        home = _shared_cli_home()
     except Exception:
-        return _fallback_home()
+        home = _fallback_home()
+    return home / ".cursor"
+
+
+def config_path() -> Path:
+    return credentials_home() / "cli-config.json"
 
 
 def _cli_env() -> dict[str, str]:
     env = {**os.environ, "NO_COLOR": "1"}
     try:
-        env["CURSOR_HOME"] = str(_persisted_home())
+        env["HOME"] = str(_shared_cli_home())
     except Exception:
+        # provider_data_dir() imports the full Agent Zero `helpers.files`
+        # module, which is not available in isolated unit-test runs -- fall
+        # back to the unmodified environment rather than failing the whole
+        # CLI call over it.
         pass
     return env
 
@@ -109,6 +112,13 @@ def _version() -> str:
 
 
 def get_status() -> dict[str, Any]:
+    """Reports install/auth state by reading cli-config.json's authInfo.
+
+    Confirmed live against the real CLI: a logged-in session populates
+    authInfo.userId/email/displayName/authId in this file -- there is no
+    separate token file to check, and no documented `agent status --json`
+    to shell out to.
+    """
     if not is_installed():
         return {
             "installed": False,
@@ -131,30 +141,43 @@ def get_status() -> dict[str, Any]:
             "user": f"Authenticated ({env_var})",
         }
 
-    home = credentials_home()
-    for relative in AUTH_FILES:
-        path = home / relative
-        try:
-            if _file_has_secret(path):
-                return {
-                    "installed": True,
-                    "authenticated": True,
-                    "version": version,
-                    "user": "Authenticated",
-                }
-        except OSError as exc:
+    path = config_path()
+    try:
+        if not (path.is_file() and path.stat().st_size > 0):
             return {
                 "installed": True,
                 "authenticated": False,
                 "version": version,
-                "error": str(exc),
+                "error": "Cursor CLI is not authenticated. Run `agent login` or set CURSOR_API_KEY.",
             }
+        payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "installed": True,
+            "authenticated": False,
+            "version": version,
+            "error": str(exc),
+        }
+
+    auth_info = payload.get("authInfo") if isinstance(payload, dict) else None
+    auth_info = auth_info if isinstance(auth_info, dict) else {}
+    user_id = str(auth_info.get("userId") or "").strip()
+    email = str(auth_info.get("email") or "").strip()
+    display_name = str(auth_info.get("displayName") or "").strip()
+
+    if not user_id and not email:
+        return {
+            "installed": True,
+            "authenticated": False,
+            "version": version,
+            "error": "Cursor CLI is not authenticated. Run `agent login` or set CURSOR_API_KEY.",
+        }
 
     return {
         "installed": True,
-        "authenticated": False,
+        "authenticated": True,
         "version": version,
-        "error": "Cursor CLI is not authenticated. Run `agent login` or set CURSOR_API_KEY.",
+        "user": email or display_name or "Authenticated",
     }
 
 
@@ -221,7 +244,7 @@ def _flatten_messages(messages: list[dict[str, Any]]) -> str:
     """Flattens an OpenAI-style messages array into one prompt string.
 
     Cursor CLI's headless `-p` mode takes a single prompt argument, not a
-    messages array -- same reasoning as claude_code_cli/command_code_cli.
+    messages array -- same reasoning as command_code_cli/claude_code_cli.
     """
     parts: list[str] = []
     for message in messages:
@@ -241,29 +264,3 @@ def _flatten_messages(messages: list[dict[str, Any]]) -> str:
         label = {"system": "System", "assistant": "Assistant"}.get(role, "User")
         parts.append(f"[{label}]\n{text}")
     return "\n\n".join(parts)
-
-
-def _file_has_secret(path: Path) -> bool:
-    if not path.is_file() or path.stat().st_size <= 0:
-        return False
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    try:
-        return _contains_secret(json.loads(text))
-    except ValueError:
-        return _text_has_secret(text)
-
-
-def _text_has_secret(text: str) -> bool:
-    return any(f'"{key}"' in text or f"{key} =" in text for key in _SECRET_KEYS)
-
-
-def _contains_secret(value: Any) -> bool:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if str(key) in _SECRET_KEYS and isinstance(item, str) and item.strip():
-                return True
-            if _contains_secret(item):
-                return True
-    if isinstance(value, list):
-        return any(_contains_secret(item) for item in value)
-    return False

@@ -52,16 +52,17 @@ cp -r --no-preserve=ownership,mode /per/* /
 # Ensure upload storage exists before API and connector callers can reference it.
 mkdir -p /a0/usr/uploads
 
-# Ensure the persisted Claude Code / Cursor CLI config dirs exist before a
-# `docker exec` shell tries to log in against them (CLAUDE_CONFIG_DIR /
-# CURSOR_HOME are set in the Dockerfile) -- otherwise the CLI's own login
-# command may fail to create a missing parent directory tree.
+# Ensure the persisted Claude Code config dir exists before a `docker exec`
+# shell tries to log in against it (CLAUDE_CONFIG_DIR is set in the
+# Dockerfile) -- otherwise the CLI's own login command may fail to create
+# a missing parent directory tree.
 mkdir -p "${CLAUDE_CONFIG_DIR:-/a0/usr/plugins/_oauth/claude_code_cli/config}"
-mkdir -p "${CURSOR_HOME:-/a0/usr/plugins/_oauth/cursor_cli/home}"
 
-# Same for Command Code CLI's relocated HOME (exported in /root/.bashrc and
-# /root/.profile, not a Dockerfile ENV -- see those files for why), so
-# `command-code login` in a fresh docker exec shell doesn't fail against a
+# Same for the shared HOME directory Command Code and Cursor CLI both
+# relocate into (exported in /root/.bashrc and /root/.profile, not a
+# Dockerfile ENV -- see those files for why: Cursor CLI ignores a
+# CURSOR_HOME override and only honors $HOME itself), so `command-code
+# login`/`agent login` in a fresh docker exec shell doesn't fail against a
 # missing parent directory tree.
 mkdir -p /a0/usr/plugins/_oauth/command_code_cli/home
 
