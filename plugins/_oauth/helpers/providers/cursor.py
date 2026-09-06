@@ -28,9 +28,12 @@ NOT_DRIVEN_MESSAGE = (
     f"its installer ({INSTALL_HINT}) is a raw shell script piped from a "
     "URL, not a scoped package-manager install, so it is never run "
     f"automatically. On the machine running Agent Zero: install with "
-    f"`{INSTALL_HINT}`, then sign in with "
-    f'CURSOR_HOME="{PERSISTED_HOME_PATH}" NO_OPEN_BROWSER=1 agent login '
-    "(or set CURSOR_API_KEY/API_KEY_CURSOR), then click Refresh here."
+    f"`{INSTALL_HINT}`, then sign in with `NO_OPEN_BROWSER=1 agent login` "
+    "(or set CURSOR_API_KEY/API_KEY_CURSOR), then click Refresh here. The "
+    f"shipped Docker image already sets CURSOR_HOME={PERSISTED_HOME_PATH}, "
+    "so a plain `agent login` in a `docker exec` shell persists correctly "
+    "on its own -- only export CURSOR_HOME yourself if running natively "
+    "outside Docker."
 )
 
 
