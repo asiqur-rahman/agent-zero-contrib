@@ -46,6 +46,7 @@ class BasicProjectData(TypedDict):
     mcp_servers: NotRequired[str]
     color: str
     git_url: str
+    git_provider: NotRequired[str]
     file_structure: FileStructureInjectionSettings
 
 class GitStatusData(TypedDict, total=False):
@@ -118,23 +119,32 @@ def create_project(name: str, data: BasicProjectData):
     return name
 
 
-def clone_git_project(name: str, git_url: str, git_token: str, data: BasicProjectData):
+def clone_git_project(
+    name: str,
+    git_url: str,
+    git_token: str,
+    data: BasicProjectData,
+    git_provider: str = "github",
+):
     """Clone a git repository as a new A0 project. Token is used only for cloning via http header."""
     from helpers import git
 
     extended_data = _project_extended_data_for_save(data)
     mcp_servers = data.get("mcp_servers") if isinstance(data, dict) else None
-    
+
     abs_path = files.create_dir_safe(
         files.get_abs_path(PROJECTS_PARENT_DIR, name), rename_format="{name}_{number}"
     )
     actual_name = files.basename(abs_path)
-    
+
     try:
-        # Clone with token via http.extraHeader (token never in URL or git config)
-        git.clone_repo(git_url, abs_path, token=git_token)
+        # Clone with token via http.extraHeader (token never in URL or git config).
+        # provider picks the right Basic-Auth username for the token (see
+        # git.GIT_PROVIDER_AUTH_USERNAMES) -- GitHub/GitLab/Bitbucket each
+        # expect a different one; getting it wrong fails auth silently.
+        git.clone_repo(git_url, abs_path, token=git_token, provider=git_provider)
         clean_url = git.strip_auth_from_url(git_url)
-        
+
         # Check if cloned repo already has .a0proj
         meta_path = os.path.join(abs_path, PROJECT_META_DIR, PROJECT_HEADER_FILE)
         if os.path.exists(meta_path):
@@ -143,12 +153,14 @@ def clone_git_project(name: str, git_url: str, git_token: str, data: BasicProjec
             cloned_header["title"] = data.get("title") or cloned_header.get("title", "")
             cloned_header["color"] = data.get("color") or cloned_header.get("color", "")
             cloned_header["git_url"] = clean_url
+            cloned_header["git_provider"] = git_provider
             save_project_header(actual_name, cloned_header)
         else:
             # New project: create meta folders and save header
             create_project_meta_folders(actual_name)
             data = _normalizeBasicData(data)
             data["git_url"] = clean_url
+            data["git_provider"] = git_provider
             save_project_header(actual_name, data)
 
         if mcp_servers:
@@ -198,6 +210,7 @@ def _normalizeBasicData(data: BasicProjectData) -> BasicProjectData:
         ),
         "color": data.get("color", ""),
         "git_url": data.get("git_url", ""),
+        "git_provider": data.get("git_provider", "github"),
         "file_structure": data.get(
             "file_structure",
             _default_file_structure_settings(),
@@ -218,6 +231,7 @@ def _normalizeEditData(data: EditProjectData) -> EditProjectData:
         "mcp_servers": data.get("mcp_servers", DEFAULT_MCP_SERVERS_CONFIG),
         "color": data.get("color", ""),
         "git_url": data.get("git_url", ""),
+        "git_provider": data.get("git_provider", "github"),
         "git_status": data.get("git_status", {"is_git_repo": False}),
         "instruction_files_count": data.get("instruction_files_count", 0),
         "knowledge_files_count": data.get("knowledge_files_count", 0),

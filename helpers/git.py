@@ -430,16 +430,30 @@ def is_official_agent_zero_repo() -> bool:
         return False
 
 
-def clone_repo(url: str, dest: str, token: str | None = None):
+# HTTP Basic Auth username each host expects for a personal-access-token
+# style credential. Using the wrong one causes an authentication failure
+# even with a valid token -- e.g. GitLab rejects `x-access-token:<token>`.
+# Unknown/custom hosts fall back to GitHub's convention, matching this
+# function's own behavior before per-provider auth existed.
+GIT_PROVIDER_AUTH_USERNAMES = {
+    "github": "x-access-token",
+    "gitlab": "oauth2",
+    "bitbucket": "x-token-auth",
+}
+
+
+def clone_repo(url: str, dest: str, token: str | None = None, provider: str = "github"):
     """Clone a git repository. Uses http.extraHeader for token auth (never stored in URL/config)."""
     cmd = ['git']
-    
+
     if token:
-        # GitHub Git HTTP requires Basic Auth, not Bearer
-        auth_string = f"x-access-token:{token}"
+        auth_username = GIT_PROVIDER_AUTH_USERNAMES.get(
+            (provider or "").strip().lower(), "x-access-token"
+        )
+        auth_string = f"{auth_username}:{token}"
         auth_base64 = base64.b64encode(auth_string.encode()).decode()
         cmd.extend(['-c', f'http.extraHeader=Authorization: Basic {auth_base64}'])
-    
+
     cmd.extend(['clone', '--progress', '--', url, dest])
     
     env = os.environ.copy()

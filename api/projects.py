@@ -68,6 +68,7 @@ class Projects(ApiHandler):
             raise Exception("Project data is required")
         git_url = project.get("git_url", "")
         git_token = project.get("git_token", "")
+        git_provider = project.get("git_provider", "github")
         if not git_url:
             raise Exception("Git URL is required")
         
@@ -83,7 +84,7 @@ class Projects(ApiHandler):
         
         try:
             data = projects.BasicProjectData(**project)
-            name = projects.clone_git_project(project["name"], git_url, git_token, data)
+            name = projects.clone_git_project(project["name"], git_url, git_token, data, git_provider)
             
             # Success notification
             NotificationManager.send_notification(
