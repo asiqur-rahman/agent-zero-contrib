@@ -13,6 +13,86 @@ async function call(action, extra = {}) {
   return await callJsonApi(API_PATH, { action, context_id: contextId(), ...extra });
 }
 
+// Turns a unified diff (as produced by `git diff`/`git diff --cached`) into
+// aligned {left, right} rows for a VS Code-style side-by-side view. Kept as
+// a plain, dependency-free parser rather than Ace's vendored `ext/diff`
+// extension -- that extension's `createDiffView` option contract could not
+// be verified without a live browser session (see AGENTS.md), and getting
+// an unverified library API wrong is worse than a simpler parser we fully
+// control and can test as pure functions.
+export function parseUnifiedDiff(diffText) {
+  if (!diffText) return [];
+  const lines = diffText.split("\n");
+  const rows = [];
+  let i = 0;
+  while (i < lines.length && !lines[i].startsWith("@@")) i++;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("@@")) {
+      rows.push({ hunkHeader: line });
+      i++;
+      continue;
+    }
+    if (line.startsWith("\\")) {
+      // "\ No newline at end of file" -- not a content line.
+      i++;
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      const text = line.slice(1);
+      rows.push({ left: { text, type: "context" }, right: { text, type: "context" } });
+      i++;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      const removed = [];
+      while (i < lines.length && lines[i].startsWith("-")) {
+        removed.push(lines[i].slice(1));
+        i++;
+        // A "\ No newline at end of file" marker can sit right after the
+        // last removed line, before the added block starts (e.g. a change
+        // that adds a trailing newline) -- skip it in place so it doesn't
+        // end the removed/added pairing early.
+        while (i < lines.length && lines[i].startsWith("\\")) i++;
+      }
+      const added = [];
+      while (i < lines.length && lines[i].startsWith("+")) {
+        added.push(lines[i].slice(1));
+        i++;
+        while (i < lines.length && lines[i].startsWith("\\")) i++;
+      }
+      const max = Math.max(removed.length, added.length);
+      for (let k = 0; k < max; k++) {
+        rows.push({
+          left: k < removed.length ? { text: removed[k], type: "removed" } : { text: "", type: "empty" },
+          right: k < added.length ? { text: added[k], type: "added" } : { text: "", type: "empty" },
+        });
+      }
+      continue;
+    }
+    if (line.startsWith("+")) {
+      rows.push({ left: { text: "", type: "empty" }, right: { text: line.slice(1), type: "added" } });
+      i++;
+      continue;
+    }
+    // Unrecognized line (e.g. a stray blank at EOF) -- skip rather than misrender.
+    i++;
+  }
+  return rows;
+}
+
+// Untracked files have no unified diff to parse (no prior version exists) --
+// the API returns the whole file content instead; render it as an
+// all-added right-only column, matching VS Code's own convention.
+function wholeFileAsAddedRows(text) {
+  if (!text) return [];
+  return text.split("\n").map((line) => ({
+    left: { text: "", type: "empty" },
+    right: { text: line, type: "added" },
+  }));
+}
+
 const model = {
   loading: false,
   isGitRepo: false,
@@ -28,6 +108,8 @@ const model = {
   diffLoading: false,
   commitMessage: "",
   committing: false,
+  pushing: false,
+  pulling: false,
 
   async onMount() {
     await this.refresh();
@@ -124,6 +206,11 @@ const model = {
     }
   },
 
+  diffRows() {
+    if (!this.diffText) return [];
+    return this.selected?.untracked ? wholeFileAsAddedRows(this.diffText) : parseUnifiedDiff(this.diffText);
+  },
+
   isSelected(path, staged, untracked) {
     return Boolean(
       this.selected &&
@@ -191,6 +278,39 @@ const model = {
       await this.refresh();
     } finally {
       this.committing = false;
+    }
+  },
+
+  async push() {
+    this.pushing = true;
+    try {
+      const response = await call("push");
+      if (!response?.ok) {
+        notifications.toastFrontendError(response?.error || "Push failed", "Source Control", 6, "source_control");
+        return;
+      }
+      notifications.toastFrontendSuccess(response.message || "Pushed.", "Source Control", 3, "source_control");
+      await this.refresh();
+    } finally {
+      this.pushing = false;
+    }
+  },
+
+  async pull() {
+    this.pulling = true;
+    try {
+      const response = await call("pull");
+      if (!response?.ok) {
+        const detail = response?.conflicting_files?.length
+          ? ` (conflicts: ${response.conflicting_files.join(", ")})`
+          : "";
+        notifications.toastFrontendError((response?.error || "Pull failed") + detail, "Source Control", 8, "source_control");
+        return;
+      }
+      notifications.toastFrontendSuccess(response.message || "Pulled.", "Source Control", 3, "source_control");
+      await this.refresh();
+    } finally {
+      this.pulling = false;
     }
   },
 };
