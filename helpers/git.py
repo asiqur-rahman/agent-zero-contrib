@@ -542,6 +542,41 @@ def update_repo(repo_path: str, auto_stash: bool = True) -> Repo:
     return repo
 
 
+def push_repo(repo_path: str) -> str:
+    """Pushes the current branch to its tracking remote (or sets one up on the
+    first push if none exists yet). Returns git's own output text.
+
+    Uses whatever git credentials are already configured in the environment
+    (SSH agent, a configured credential.helper, etc.) -- no token handling
+    here, matching how the active project's own supplied git_token is
+    already transient/clone-only by design (see helpers/projects.py's
+    _PROJECT_TRANSIENT_INPUT_KEYS). GIT_TERMINAL_PROMPT=0 so a missing or
+    invalid credential fails fast with a clear error instead of hanging on
+    an interactive prompt that can never be answered here.
+    """
+    repo = Repo(repo_path)
+    if repo.bare:
+        raise ValueError(f"Repository at {repo_path} is bare and cannot be pushed.")
+    if repo.head.is_detached:
+        raise ValueError("Repository HEAD is detached; cannot push.")
+
+    branch = repo.active_branch.name
+    tracking_branch = repo.active_branch.tracking_branch()
+
+    env = os.environ.copy()
+    env['GIT_TERMINAL_PROMPT'] = '0'
+
+    with repo.git.custom_environment(**env):
+        if tracking_branch is not None:
+            output = repo.git.push()
+        else:
+            if not repo.remotes:
+                raise ValueError("No remote configured for this repository.")
+            output = repo.git.push("--set-upstream", repo.remotes[0].name, branch)
+
+    return output.strip() if output else "Everything up-to-date."
+
+
 # Files to ignore when checking dirty status (A0 project metadata)
 A0_IGNORE_PATTERNS = {".a0proj", ".a0proj/"}
 

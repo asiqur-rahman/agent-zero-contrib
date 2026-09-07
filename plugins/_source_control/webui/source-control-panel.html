@@ -9,18 +9,6 @@
 
 <body>
     <div class="sc-panel" x-data x-init="$store.sourceControl.onMount()">
-        <div class="sc-header">
-            <div class="sc-header-title">
-                <x-icon class="icon" name="commit"></x-icon>
-                <span>Source Control</span>
-            </div>
-            <button type="button" class="button icon-button" title="Refresh"
-                @click="$store.sourceControl.refresh()"
-                :disabled="$store.sourceControl.loading">
-                <x-icon class="icon" name="refresh"></x-icon>
-            </button>
-        </div>
-
         <template x-if="$store.sourceControl.loading && !$store.sourceControl.isGitRepo">
             <div class="sc-empty">Loading...</div>
         </template>
@@ -30,108 +18,156 @@
         </template>
 
         <template x-if="$store.sourceControl.isGitRepo">
-            <div class="sc-body">
-                <div class="sc-branch">
-                    <x-icon class="icon" name="alt_route"></x-icon>
-                    <span x-text="$store.sourceControl.currentBranch || '(detached)'"></span>
-                </div>
-
-                <template x-if="!$store.sourceControl.hasChanges()">
-                    <div class="sc-empty">No changes.</div>
-                </template>
-
-                <template x-if="$store.sourceControl.staged.length > 0">
-                    <div class="sc-section">
-                        <div class="sc-section-header">
-                            <span>Staged Changes (<span x-text="$store.sourceControl.staged.length"></span>)</span>
-                            <button type="button" class="button icon-button" title="Unstage all"
-                                @click="$store.sourceControl.unstageAllStaged()">
-                                <x-icon class="icon" name="remove"></x-icon>
+            <div class="sc-layout">
+                <div class="sc-sidebar">
+                    <div class="sc-toolbar">
+                        <div class="sc-branch">
+                            <x-icon class="icon" name="alt_route"></x-icon>
+                            <span x-text="$store.sourceControl.currentBranch || '(detached)'"></span>
+                        </div>
+                        <div class="sc-toolbar-actions">
+                            <button type="button" class="button icon-button" title="Pull"
+                                @click="$store.sourceControl.pull()"
+                                :disabled="$store.sourceControl.pulling || $store.sourceControl.pushing">
+                                <template x-if="$store.sourceControl.pulling">
+                                    <span class="spinner"></span>
+                                </template>
+                                <template x-if="!$store.sourceControl.pulling">
+                                    <x-icon class="icon" name="download"></x-icon>
+                                </template>
+                            </button>
+                            <button type="button" class="button icon-button" title="Push"
+                                @click="$store.sourceControl.push()"
+                                :disabled="$store.sourceControl.pushing || $store.sourceControl.pulling">
+                                <template x-if="$store.sourceControl.pushing">
+                                    <span class="spinner"></span>
+                                </template>
+                                <template x-if="!$store.sourceControl.pushing">
+                                    <x-icon class="icon" name="upload"></x-icon>
+                                </template>
+                            </button>
+                            <button type="button" class="button icon-button" title="Refresh"
+                                @click="$store.sourceControl.refresh()"
+                                :disabled="$store.sourceControl.loading">
+                                <x-icon class="icon" name="refresh"></x-icon>
                             </button>
                         </div>
-                        <template x-for="entry in $store.sourceControl.staged" :key="'staged:' + entry.path">
-                            <div class="sc-file-row"
-                                :class="{ 'is-selected': $store.sourceControl.isSelected(entry.path, true, false) }"
-                                @click="$store.sourceControl.selectFile({ path: entry.path, staged: true, untracked: false })">
-                                <span class="sc-file-status" :data-status="entry.status" x-text="entry.status[0].toUpperCase()"></span>
-                                <span class="sc-file-path" x-text="entry.path"></span>
-                                <button type="button" class="button icon-button sc-file-action" title="Unstage"
-                                    @click.stop="$store.sourceControl.unstage(entry.path)">
-                                    <x-icon class="icon" name="remove"></x-icon>
-                                </button>
-                            </div>
-                        </template>
                     </div>
-                </template>
 
-                <template x-if="$store.sourceControl.unstaged.length > 0 || $store.sourceControl.untracked.length > 0">
-                    <div class="sc-section">
-                        <div class="sc-section-header">
-                            <span>Changes (<span x-text="$store.sourceControl.unstaged.length + $store.sourceControl.untracked.length"></span>)</span>
-                            <button type="button" class="button icon-button" title="Stage all"
-                                @click="$store.sourceControl.stageAllUnstaged()">
-                                <x-icon class="icon" name="add"></x-icon>
-                            </button>
-                        </div>
-                        <template x-for="entry in $store.sourceControl.unstaged" :key="'unstaged:' + entry.path">
-                            <div class="sc-file-row"
-                                :class="{ 'is-selected': $store.sourceControl.isSelected(entry.path, false, false) }"
-                                @click="$store.sourceControl.selectFile({ path: entry.path, staged: false, untracked: false })">
-                                <span class="sc-file-status" :data-status="entry.status" x-text="entry.status[0].toUpperCase()"></span>
-                                <span class="sc-file-path" x-text="entry.path"></span>
-                                <button type="button" class="button icon-button sc-file-action" title="Stage"
-                                    @click.stop="$store.sourceControl.stage(entry.path)">
-                                    <x-icon class="icon" name="add"></x-icon>
-                                </button>
-                            </div>
-                        </template>
-                        <template x-for="path in $store.sourceControl.untracked" :key="'untracked:' + path">
-                            <div class="sc-file-row"
-                                :class="{ 'is-selected': $store.sourceControl.isSelected(path, false, true) }"
-                                @click="$store.sourceControl.selectFile({ path: path, staged: false, untracked: true })">
-                                <span class="sc-file-status" data-status="untracked">U</span>
-                                <span class="sc-file-path" x-text="path"></span>
-                                <button type="button" class="button icon-button sc-file-action" title="Stage"
-                                    @click.stop="$store.sourceControl.stage(path)">
-                                    <x-icon class="icon" name="add"></x-icon>
-                                </button>
-                            </div>
-                        </template>
-                    </div>
-                </template>
-
-                <template x-if="$store.sourceControl.staged.length > 0">
                     <div class="sc-commit-box">
                         <textarea class="sc-commit-input" rows="3" placeholder="Commit message"
                             x-model="$store.sourceControl.commitMessage"
                             :disabled="$store.sourceControl.committing"></textarea>
                         <button type="button" class="button confirm sc-commit-button"
                             @click="$store.sourceControl.commit()"
-                            :disabled="$store.sourceControl.committing || !$store.sourceControl.commitMessage.trim()">
+                            :disabled="$store.sourceControl.committing || !$store.sourceControl.staged.length || !$store.sourceControl.commitMessage.trim()">
                             <template x-if="$store.sourceControl.committing">
                                 <span class="button-loading"><span class="spinner"></span><span>Committing...</span></span>
                             </template>
                             <template x-if="!$store.sourceControl.committing">
-                                <span x-text="'Commit ' + $store.sourceControl.staged.length + ' file(s)'"></span>
+                                <span x-text="$store.sourceControl.staged.length ? ('Commit ' + $store.sourceControl.staged.length + ' file(s)') : 'Commit'"></span>
                             </template>
                         </button>
                     </div>
-                </template>
 
-                <template x-if="$store.sourceControl.selected">
-                    <div class="sc-diff">
-                        <div class="sc-diff-header" x-text="$store.sourceControl.selected.path"></div>
-                        <template x-if="$store.sourceControl.diffLoading">
-                            <div class="sc-empty">Loading diff...</div>
+                    <div class="sc-file-list">
+                        <template x-if="!$store.sourceControl.hasChanges()">
+                            <div class="sc-empty">No changes.</div>
                         </template>
-                        <template x-if="!$store.sourceControl.diffLoading && !$store.sourceControl.diffText">
-                            <div class="sc-empty">No diff to show.</div>
+
+                        <template x-if="$store.sourceControl.staged.length > 0">
+                            <div class="sc-section">
+                                <div class="sc-section-header">
+                                    <span>Staged Changes (<span x-text="$store.sourceControl.staged.length"></span>)</span>
+                                    <button type="button" class="button icon-button" title="Unstage all"
+                                        @click="$store.sourceControl.unstageAllStaged()">
+                                        <x-icon class="icon" name="remove"></x-icon>
+                                    </button>
+                                </div>
+                                <template x-for="entry in $store.sourceControl.staged" :key="'staged:' + entry.path">
+                                    <div class="sc-file-row"
+                                        :class="{ 'is-selected': $store.sourceControl.isSelected(entry.path, true, false) }"
+                                        @click="$store.sourceControl.selectFile({ path: entry.path, staged: true, untracked: false })">
+                                        <span class="sc-file-status" :data-status="entry.status" x-text="entry.status[0].toUpperCase()"></span>
+                                        <span class="sc-file-path" x-text="entry.path"></span>
+                                        <button type="button" class="button icon-button sc-file-action" title="Unstage"
+                                            @click.stop="$store.sourceControl.unstage(entry.path)">
+                                            <x-icon class="icon" name="remove"></x-icon>
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
                         </template>
-                        <template x-if="!$store.sourceControl.diffLoading && $store.sourceControl.diffText">
-                            <pre class="sc-diff-content" x-text="$store.sourceControl.diffText"></pre>
+
+                        <template x-if="$store.sourceControl.unstaged.length > 0 || $store.sourceControl.untracked.length > 0">
+                            <div class="sc-section">
+                                <div class="sc-section-header">
+                                    <span>Changes (<span x-text="$store.sourceControl.unstaged.length + $store.sourceControl.untracked.length"></span>)</span>
+                                    <button type="button" class="button icon-button" title="Stage all"
+                                        @click="$store.sourceControl.stageAllUnstaged()">
+                                        <x-icon class="icon" name="add"></x-icon>
+                                    </button>
+                                </div>
+                                <template x-for="entry in $store.sourceControl.unstaged" :key="'unstaged:' + entry.path">
+                                    <div class="sc-file-row"
+                                        :class="{ 'is-selected': $store.sourceControl.isSelected(entry.path, false, false) }"
+                                        @click="$store.sourceControl.selectFile({ path: entry.path, staged: false, untracked: false })">
+                                        <span class="sc-file-status" :data-status="entry.status" x-text="entry.status[0].toUpperCase()"></span>
+                                        <span class="sc-file-path" x-text="entry.path"></span>
+                                        <button type="button" class="button icon-button sc-file-action" title="Stage"
+                                            @click.stop="$store.sourceControl.stage(entry.path)">
+                                            <x-icon class="icon" name="add"></x-icon>
+                                        </button>
+                                    </div>
+                                </template>
+                                <template x-for="path in $store.sourceControl.untracked" :key="'untracked:' + path">
+                                    <div class="sc-file-row"
+                                        :class="{ 'is-selected': $store.sourceControl.isSelected(path, false, true) }"
+                                        @click="$store.sourceControl.selectFile({ path: path, staged: false, untracked: true })">
+                                        <span class="sc-file-status" data-status="untracked">U</span>
+                                        <span class="sc-file-path" x-text="path"></span>
+                                        <button type="button" class="button icon-button sc-file-action" title="Stage"
+                                            @click.stop="$store.sourceControl.stage(path)">
+                                            <x-icon class="icon" name="add"></x-icon>
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
                         </template>
                     </div>
-                </template>
+                </div>
+
+                <div class="sc-diff-pane">
+                    <template x-if="!$store.sourceControl.selected">
+                        <div class="sc-empty sc-diff-placeholder">Select a file to see its changes.</div>
+                    </template>
+                    <template x-if="$store.sourceControl.selected">
+                        <div class="sc-diff">
+                            <div class="sc-diff-header" x-text="$store.sourceControl.selected.path"></div>
+                            <template x-if="$store.sourceControl.diffLoading">
+                                <div class="sc-empty">Loading diff...</div>
+                            </template>
+                            <template x-if="!$store.sourceControl.diffLoading && !$store.sourceControl.diffRows().length">
+                                <div class="sc-empty">No diff to show.</div>
+                            </template>
+                            <template x-if="!$store.sourceControl.diffLoading && $store.sourceControl.diffRows().length">
+                                <div class="sc-diff-table">
+                                    <template x-for="(row, index) in $store.sourceControl.diffRows()" :key="index">
+                                        <template x-if="row.hunkHeader">
+                                            <div class="sc-diff-hunk" x-text="row.hunkHeader"></div>
+                                        </template>
+                                        <template x-if="!row.hunkHeader">
+                                            <div class="sc-diff-row">
+                                                <pre class="sc-diff-cell" :data-type="row.left.type" x-text="row.left.text"></pre>
+                                                <pre class="sc-diff-cell" :data-type="row.right.type" x-text="row.right.text"></pre>
+                                            </div>
+                                        </template>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
             </div>
         </template>
     </div>
@@ -144,40 +180,77 @@
         overflow: hidden;
     }
 
-    .sc-header {
+    .sc-empty {
+        padding: 1em;
+        color: var(--color-text-secondary, inherit);
+        font-size: 0.9em;
+    }
+
+    .sc-layout {
+        display: flex;
+        flex-direction: row;
+        height: 100%;
+        overflow: hidden;
+    }
+
+    .sc-sidebar {
+        flex: 0 0 280px;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--color-border);
+        overflow: hidden;
+    }
+
+    .sc-toolbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0.75em 1em;
+        padding: 0.6em 0.75em;
         border-bottom: 1px solid var(--color-border);
-    }
-
-    .sc-header-title {
-        display: flex;
-        align-items: center;
-        gap: 0.5em;
-        font-weight: 600;
-    }
-
-    .sc-body {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        padding: 0.5em 1em 1em;
+        flex: 0 0 auto;
     }
 
     .sc-branch {
         display: flex;
         align-items: center;
         gap: 0.4em;
-        padding: 0.5em 0;
-        color: var(--color-text-secondary, inherit);
         font-size: 0.9em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .sc-empty {
-        padding: 1em 0;
-        color: var(--color-text-secondary, inherit);
-        font-size: 0.9em;
+    .sc-toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.25em;
+        flex: 0 0 auto;
+    }
+
+    .sc-commit-box {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5em;
+        padding: 0.75em;
+        border-bottom: 1px solid var(--color-border);
+        flex: 0 0 auto;
+    }
+
+    .sc-commit-input {
+        width: 100%;
+        resize: vertical;
+        font-family: inherit;
+        padding: 0.5em;
+        border-radius: 0.3em;
+        border: 1px solid var(--color-border);
+        background: var(--color-input-bg, transparent);
+        color: inherit;
+    }
+
+    .sc-file-list {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 0.5em 0.75em 1em;
     }
 
     .sc-section {
@@ -251,47 +324,86 @@
         opacity: 1;
     }
 
-    .sc-commit-box {
+    .sc-diff-pane {
+        flex: 1 1 auto;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
-        gap: 0.5em;
-        margin: 0.75em 0;
     }
 
-    .sc-commit-input {
-        width: 100%;
-        resize: vertical;
-        font-family: inherit;
-        padding: 0.5em;
-        border-radius: 0.3em;
-        border: 1px solid var(--color-border);
-        background: var(--color-input-bg, transparent);
-        color: inherit;
+    .sc-diff-placeholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        text-align: center;
     }
 
     .sc-diff {
-        margin-top: 0.75em;
-        border-top: 1px solid var(--color-border);
-        padding-top: 0.5em;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
     }
 
     .sc-diff-header {
+        flex: 0 0 auto;
         font-weight: 600;
         font-size: 0.85em;
-        margin-bottom: 0.4em;
+        padding: 0.6em 0.75em;
+        border-bottom: 1px solid var(--color-border);
         overflow-wrap: break-word;
     }
 
-    .sc-diff-content {
-        white-space: pre-wrap;
-        overflow-wrap: break-word;
+    .sc-diff-table {
+        flex: 1 1 auto;
+        overflow: auto;
         font-family: var(--font-mono, monospace);
         font-size: 0.85em;
-        background: var(--color-panel, rgba(128, 128, 128, 0.05));
-        border-radius: 0.3em;
-        padding: 0.5em;
-        max-height: 40vh;
-        overflow-y: auto;
+    }
+
+    .sc-diff-hunk {
+        padding: 0.3em 0.75em;
+        color: var(--color-text-secondary, inherit);
+        background: var(--color-panel, rgba(128, 128, 128, 0.06));
+        border-bottom: 1px solid var(--color-border);
+        border-top: 1px solid var(--color-border);
+    }
+
+    .sc-diff-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .sc-diff-cell {
+        margin: 0;
+        padding: 0 0.75em;
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+        border-right: 1px solid var(--color-border);
+        font-family: inherit;
+    }
+
+    .sc-diff-cell:last-child {
+        border-right: none;
+    }
+
+    .sc-diff-cell[data-type="removed"] {
+        background: rgba(248, 81, 73, 0.15);
+    }
+
+    .sc-diff-cell[data-type="added"] {
+        background: rgba(63, 185, 80, 0.15);
+    }
+
+    .sc-diff-cell[data-type="empty"] {
+        background: repeating-linear-gradient(
+            45deg,
+            rgba(128, 128, 128, 0.04),
+            rgba(128, 128, 128, 0.04) 4px,
+            rgba(128, 128, 128, 0.08) 4px,
+            rgba(128, 128, 128, 0.08) 8px
+        );
     }
 
     .button-loading {
@@ -303,10 +415,11 @@
     .spinner {
         width: 14px;
         height: 14px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top: 2px solid white;
+        border: 2px solid rgba(128, 128, 128, 0.3);
+        border-top: 2px solid var(--color-text, white);
         border-radius: 50%;
         animation: sc-spin 1s linear infinite;
+        display: inline-block;
     }
 
     @keyframes sc-spin {

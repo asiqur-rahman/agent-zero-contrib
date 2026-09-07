@@ -7,8 +7,11 @@ from helpers import git, projects
 class SourceControl(ApiHandler):
     """Backs the Source Control canvas panel for the active project's git repo.
 
-    View + basic-actions scope only (status, diffs, stage/unstage, commit) --
-    no pull/push/branch management. See plugins/_source_control/AGENTS.md.
+    Status, diffs, stage/unstage, commit, plus push/pull against the
+    branch's existing tracking remote (or set one up on first push). No
+    branch creation/switching/deletion, no merge/rebase beyond the
+    fast-forward-with-auto-stash pull() already provides. See
+    plugins/_source_control/AGENTS.md.
     """
 
     async def process(self, input: Input, request: Request) -> Output:
@@ -27,6 +30,10 @@ class SourceControl(ApiHandler):
                 return self._unstage(repo_path, input)
             if action == "commit":
                 return self._commit(repo_path, input)
+            if action == "push":
+                return self._push(repo_path)
+            if action == "pull":
+                return self._pull(repo_path)
             return {"ok": False, "error": f"Unsupported source control action: {action}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -79,6 +86,25 @@ class SourceControl(ApiHandler):
     def _commit(self, repo_path: str, input: Input) -> dict:
         commit_sha = git.commit_staged(repo_path, str(input.get("message") or ""))
         return {"ok": True, "commit": commit_sha}
+
+    def _push(self, repo_path: str) -> dict:
+        message = git.push_repo(repo_path)
+        return {"ok": True, "message": message}
+
+    def _pull(self, repo_path: str) -> dict:
+        # update_repo() already covers exactly what "Pull" needs here
+        # (fast-forward with auto-stash of dirty tracked files, restoring
+        # original state on conflict) -- reused rather than duplicated, see
+        # plugins/_source_control/AGENTS.md.
+        try:
+            git.update_repo(repo_path)
+        except git.DirtyTreeConflictError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "conflicting_files": exc.conflicting_files,
+            }
+        return {"ok": True, "message": "Pulled latest changes."}
 
     def _paths_from_input(self, input: Input) -> list[str]:
         paths = input.get("paths")

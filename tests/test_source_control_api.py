@@ -158,8 +158,56 @@ def test_commit_error_surfaces_as_ok_false(monkeypatch):
     assert result == {"ok": False, "error": "Nothing staged to commit."}
 
 
+def test_push_returns_message(monkeypatch):
+    handler = _handler(monkeypatch)
+    monkeypatch.setattr(sc_api.git, "push_repo", lambda path: "Everything up-to-date.")
+    result = _run(handler.process({"action": "push", "context_id": "ctx1"}, request=None))
+    assert result == {"ok": True, "message": "Everything up-to-date."}
+
+
+def test_push_error_surfaces_as_ok_false(monkeypatch):
+    handler = _handler(monkeypatch)
+
+    def raise_error(path):
+        raise ValueError("Repository HEAD is detached; cannot push.")
+
+    monkeypatch.setattr(sc_api.git, "push_repo", raise_error)
+    result = _run(handler.process({"action": "push", "context_id": "ctx1"}, request=None))
+    assert result == {"ok": False, "error": "Repository HEAD is detached; cannot push."}
+
+
+def test_pull_returns_ok_on_success(monkeypatch):
+    handler = _handler(monkeypatch)
+    monkeypatch.setattr(sc_api.git, "update_repo", lambda path: None)
+    result = _run(handler.process({"action": "pull", "context_id": "ctx1"}, request=None))
+    assert result == {"ok": True, "message": "Pulled latest changes."}
+
+
+def test_pull_conflict_surfaces_conflicting_files(monkeypatch):
+    handler = _handler(monkeypatch)
+
+    def raise_conflict(path):
+        raise sc_api.git.DirtyTreeConflictError(["a.py", "b.py"])
+
+    monkeypatch.setattr(sc_api.git, "update_repo", raise_conflict)
+    result = _run(handler.process({"action": "pull", "context_id": "ctx1"}, request=None))
+    assert result["ok"] is False
+    assert result["conflicting_files"] == ["a.py", "b.py"]
+
+
+def test_pull_other_errors_surface_as_ok_false(monkeypatch):
+    handler = _handler(monkeypatch)
+
+    def raise_error(path):
+        raise ValueError("Current branch has no tracking remote branch.")
+
+    monkeypatch.setattr(sc_api.git, "update_repo", raise_error)
+    result = _run(handler.process({"action": "pull", "context_id": "ctx1"}, request=None))
+    assert result == {"ok": False, "error": "Current branch has no tracking remote branch."}
+
+
 def test_unsupported_action_returns_error(monkeypatch):
     handler = _handler(monkeypatch)
-    result = _run(handler.process({"action": "push", "context_id": "ctx1"}, request=None))
+    result = _run(handler.process({"action": "rebase", "context_id": "ctx1"}, request=None))
     assert result["ok"] is False
     assert "Unsupported source control action" in result["error"]
