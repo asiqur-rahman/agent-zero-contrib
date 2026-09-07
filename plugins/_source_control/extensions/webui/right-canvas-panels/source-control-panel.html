@@ -1,0 +1,11 @@
+<div
+  class="right-canvas-surface-panel source-control-canvas-surface"
+  data-surface-id="source-control"
+  :class="{
+    'is-active': $store.rightCanvas?.isSurfaceVisible('source-control'),
+    'is-mounted': $store.rightCanvas?.isSurfaceRendered('source-control')
+  }"
+  :aria-hidden="(!$store.rightCanvas?.isSurfaceVisible('source-control')).toString()"
+>
+  <x-component path="/plugins/_source_control/webui/source-control-panel.html"></x-component>
+</div>

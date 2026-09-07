@@ -606,3 +606,144 @@ def get_repo_status(repo_path: str) -> dict:
         }
     except Exception as e:
         return {"is_git_repo": False, "error": str(e)}
+
+
+# --- Source Control panel: change listing, diffs, stage/unstage, commit ---
+# Deliberately view + basic-actions scope only (no pull/push/branch
+# management) -- see plugins/_source_control/AGENTS.md.
+#
+# Built on plain `git diff`/`git diff --cached` via GitPython's `repo.git`
+# command proxy rather than the `IndexFile.diff()` object API: the latter's
+# staged-vs-HEAD direction turned out inverted from `git status`/`git diff
+# --cached` conventions when verified against a real repo (a newly staged
+# file came back "deleted" instead of "added"), and it flatly rejects
+# NULL_TREE for the pre-first-commit case ("other must be None, INDEX, a
+# Tree or Commit"). Plain `git diff --cached` already handles a repo with no
+# commits yet correctly on its own (diffs against an empty tree), so no
+# NULL_TREE special-casing is needed at all with this approach.
+
+_NAME_STATUS_LABELS = {
+    "A": "added",
+    "D": "deleted",
+    "M": "modified",
+    "R": "renamed",
+    "C": "copied",
+    "T": "type_changed",
+    "U": "unmerged",
+}
+
+
+def _is_a0_project_file(path: str | None) -> bool:
+    """Excludes A0's own project metadata dir from user-facing change lists.
+
+    Same exclusion already applied in get_repo_status()/_list_dirty_tracked_files()
+    above, hoisted here for the Source Control panel's own functions.
+    """
+    if not path:
+        return False
+    return path.startswith(".a0proj") or path == ".a0proj"
+
+
+def _open_repo(repo_path: str) -> Repo:
+    repo = Repo(repo_path)
+    if repo.bare:
+        raise ValueError(f"Repository at {repo_path} is bare and cannot be used.")
+    return repo
+
+
+def _parse_name_status(output: str) -> list[dict]:
+    entries = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        # Renamed/copied lines carry two tab-separated paths (old, new) with
+        # a similarity-percentage suffix on the status code (e.g. "R100");
+        # the LAST field is the path the user sees today.
+        parts = line.split("\t")
+        path = parts[-1]
+        if _is_a0_project_file(path):
+            continue
+        entries.append({"path": path, "status": _NAME_STATUS_LABELS.get(parts[0][:1], "modified")})
+    return entries
+
+
+def list_changed_files(repo_path: str) -> dict:
+    """Lists staged/unstaged changes and untracked files for the Source Control panel.
+
+    Returns {"staged": [...], "unstaged": [...], "untracked": [...]}, where
+    staged/unstaged entries are {"path": str, "status": "added"|"modified"|...}
+    and untracked is a plain list of paths. A0 project metadata (.a0proj) is
+    excluded throughout, matching get_repo_status()'s own dirty-check.
+    """
+    repo = _open_repo(repo_path)
+
+    staged = _parse_name_status(repo.git.diff("--cached", "--name-status"))
+    unstaged = _parse_name_status(repo.git.diff("--name-status"))
+    untracked = [path for path in repo.untracked_files if not _is_a0_project_file(path)]
+
+    return {"staged": staged, "unstaged": unstaged, "untracked": untracked}
+
+
+def get_file_diff(repo_path: str, file_path: str, *, staged: bool = False) -> str:
+    """Unified diff text for one tracked file's change.
+
+    staged=True diffs what's staged (against HEAD, or an empty tree
+    pre-first-commit); staged=False diffs the working tree against the
+    index (what's not yet staged). Untracked files have no meaningful diff
+    here -- use get_untracked_file_preview() for those instead.
+    """
+    repo = _open_repo(repo_path)
+    if staged:
+        return repo.git.diff("--cached", "--", file_path)
+    return repo.git.diff("--", file_path)
+
+
+def get_untracked_file_preview(repo_path: str, file_path: str, *, max_bytes: int = 200_000) -> str:
+    """Whole-file preview for an untracked file (there's no prior version to diff against)."""
+    abs_path = os.path.join(repo_path, file_path)
+    try:
+        with open(abs_path, "rb") as handle:
+            data = handle.read(max_bytes + 1)
+    except OSError as exc:
+        return f"Unable to read {file_path}: {exc}"
+    truncated = len(data) > max_bytes
+    text = data[:max_bytes].decode("utf-8", errors="replace")
+    if truncated:
+        text += "\n... (truncated)"
+    return text
+
+
+def stage_files(repo_path: str, paths: list[str]) -> None:
+    if not paths:
+        return
+    repo = _open_repo(repo_path)
+    repo.index.add(paths)
+
+
+def unstage_files(repo_path: str, paths: list[str]) -> None:
+    if not paths:
+        return
+    repo = _open_repo(repo_path)
+    if repo.head.is_valid():
+        repo.git.restore("--staged", "--", *paths)
+    else:
+        # `git restore --staged` needs a HEAD to restore from; pre-first-commit
+        # there's nothing to restore TO, so just drop the paths from the index.
+        repo.index.remove(paths, working_tree=False)
+
+
+def commit_staged(repo_path: str, message: str) -> str:
+    """Commits currently staged changes and returns the new commit's hex sha.
+
+    Raises if the message is blank or nothing is staged -- this mirrors
+    plain `git commit`'s own refusal, surfaced as a normal exception for the
+    API layer's existing generic error handling to catch.
+    """
+    repo = _open_repo(repo_path)
+    message = (message or "").strip()
+    if not message:
+        raise ValueError("Commit message is required.")
+    if not repo.git.diff("--cached", "--name-only").strip():
+        raise ValueError("Nothing staged to commit.")
+    commit = repo.index.commit(message)
+    return commit.hexsha
