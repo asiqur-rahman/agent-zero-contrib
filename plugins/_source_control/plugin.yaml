@@ -1,0 +1,5 @@
+name: _source_control
+title: Source Control
+description: Git status/diff/stage/commit canvas panel for the active project's repository.
+version: 1.0.0
+always_enabled: false
