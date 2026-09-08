@@ -35,11 +35,11 @@ NOT_DRIVEN_MESSAGE = (
     f"automatically. On the machine running Agent Zero: install with "
     f"`{INSTALL_HINT}`, then sign in with `agent` or `NO_OPEN_BROWSER=1 "
     "agent login` (or set CURSOR_API_KEY/API_KEY_CURSOR), then click "
-    "Refresh here. A `docker exec` shell already persists this correctly "
-    "on its own (this container's shell exports HOME to a persisted path "
-    "for exactly this reason, since Cursor CLI itself only honors $HOME, "
-    f"not CURSOR_HOME) -- only export HOME=\"{PERSISTED_HOME_PATH}\" "
-    "yourself if running natively outside Docker."
+    "Refresh here. No HOME override is needed: Cursor CLI only honors $HOME "
+    "(not CURSOR_HOME), so a login left in any shell's default home is "
+    f"adopted into {PERSISTED_HOME_PATH} the first time this page reads it, "
+    "which is what keeps it across a container restart, image update, or "
+    "recreate."
 )
 
 
@@ -135,9 +135,16 @@ class CursorCliOAuthProvider:
                 "note": f"{env_var} is set in the environment. Unset it to sign out.",
             }
 
-        path = cursor_cli.config_path()
-        if path.exists():
-            path.unlink()
+        # Any stray copy in a default `~/.cursor` has to go too, or
+        # get_status() would simply re-adopt it on the next read and this
+        # Disconnect would look like a no-op (see
+        # cursor_cli.adoptable_config_paths()).
+        from plugins._oauth.helpers import cli_runtime
+
+        removed = cli_runtime.purge_files(
+            [cursor_cli.config_path(), *cursor_cli.adoptable_config_paths()]
+        )
+        if removed:
             return {"disconnected": True}
         return {"disconnected": False, "note": "No Cursor CLI credentials found."}
 

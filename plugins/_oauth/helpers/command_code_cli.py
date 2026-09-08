@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from plugins._oauth.helpers import cli_runtime
+
 # Command Code (https://commandcode.ai) has no published REST/OAuth API --
 # unlike Codex/GitHub Copilot/Gemini/xAI Grok, which this plugin drives via a
 # real OAuth handshake against the vendor's own servers, this provider shells
@@ -14,11 +16,10 @@ from typing import Any
 # The user authenticates with `command-code login` themselves, outside Agent
 # Zero; this module only ever reads that CLI's public status/output surface.
 COMMAND_CODE_BINARY = "command-code"
-NPM_BINARY = "npm"
+NPM_PACKAGE = "command-code"
 VERSION_TIMEOUT_SECONDS = 5
 STATUS_TIMEOUT_SECONDS = 8
 RUN_TIMEOUT_SECONDS = 300
-INSTALL_TIMEOUT_SECONDS = 180
 
 
 def _persisted_home() -> Path:
@@ -28,12 +29,10 @@ def _persisted_home() -> Path:
     # The container's writable layer outside usr/ (this plugin's own
     # persisted directory, see provider_data_dir()) does not survive a
     # container recreation, so a login under the default $HOME (typically
-    # /root) is lost on every image update/redeploy -- this is the confirmed
-    # cause of Command Code repeatedly showing disconnected. Overriding HOME
-    # to a path under usr/ for every command-code invocation fixes that,
-    # but only once the user re-runs `command-code login` under the SAME
-    # override (see README) -- a prior /root/.commandcode session is not
-    # migrated automatically.
+    # /root) is lost on every image update/redeploy. Overriding HOME to a
+    # path under usr/ for every command-code invocation fixes that; a
+    # session that already exists under a default $HOME is adopted into it
+    # by _adopt_existing_session() rather than being ignored.
     from plugins._oauth.helpers.providers.base import COMMAND_CODE_PROVIDER_ID, provider_data_dir
 
     home = provider_data_dir(COMMAND_CODE_PROVIDER_ID) / "home"
@@ -41,78 +40,91 @@ def _persisted_home() -> Path:
     return home
 
 
+def session_dir() -> Path:
+    """The `.commandcode` directory this module treats as authoritative."""
+    return _persisted_home() / ".commandcode"
+
+
+def _adopt_existing_session() -> None:
+    """Migrates a login left in a non-persisted `$HOME` into the persisted one.
+
+    Without this, a `command-code login` run anywhere that did not have the
+    relocated HOME exported -- most commonly `docker exec <c> bash -c
+    'command-code login'`, which is non-interactive and so never sources
+    /root/.bashrc -- writes to /root/.commandcode. That login works when
+    checked by hand in a shell, but is invisible to this module (which
+    always reads the persisted HOME) and is destroyed by the next container
+    recreate. Adopting it makes both problems go away permanently: after
+    the copy the persisted directory is the only one read, and the only one
+    the CLI refreshes its token into.
+    """
+    try:
+        target = session_dir()
+    except Exception:
+        return
+    cli_runtime.adopt_tree(
+        target,
+        [home / ".commandcode" for home in cli_runtime.default_homes()],
+    )
+
+
+def _binary() -> str:
+    try:
+        home = _persisted_home()
+    except Exception:
+        home = None
+    return cli_runtime.resolve_binary(COMMAND_CODE_BINARY, home=home)
+
+
 def _cli_env() -> dict[str, str]:
     env = {**os.environ, "NO_COLOR": "1"}
+    home: Path | None = None
     try:
-        env["HOME"] = str(_persisted_home())
+        home = _persisted_home()
+        env["HOME"] = str(home)
     except Exception:
         # provider_data_dir() imports the full Agent Zero `helpers.files`
         # module, which is not available in isolated unit-test runs -- fall
         # back to the unmodified environment (no persisted HOME override)
         # rather than failing the whole CLI call over it.
         pass
-    return env
+    return cli_runtime.env_with_bin_path(env, home=home)
 
 
 def npm_available() -> bool:
-    try:
-        result = subprocess.run(
-            [NPM_BINARY, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=VERSION_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+    return cli_runtime.npm_available()
 
 
 def install_latest() -> dict[str, Any]:
-    """Runs `npm install -g command-code@latest`.
+    """Installs `command-code@latest` into the persisted npm prefix.
 
     This only ever installs the CLI binary itself -- it never touches
     authentication. A successful install still requires the user to run
     `command-code login` themselves; nothing here attempts to automate that,
     and it never will (see the module docstring for why).
+
+    The prefix is under usr/ (see cli_runtime.npm_prefix()) rather than
+    npm's default /usr/local, so the install survives a container
+    recreation -- otherwise every image update silently un-installs the CLI
+    and this provider reports "not installed" even though the login is
+    still there.
     """
     if not npm_available():
         return {
             "ok": False,
             "error": "npm is not available on PATH. Install Node.js first, then retry.",
         }
-
-    try:
-        result = subprocess.run(
-            [NPM_BINARY, "install", "-g", "command-code@latest"],
-            capture_output=True,
-            text=True,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "error": f"npm install timed out after {INSTALL_TIMEOUT_SECONDS}s.",
-        }
-    except OSError as exc:
-        return {"ok": False, "error": f"Unable to run npm install: {exc}"}
-
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        # npm's own output can be long (deprecation warnings, audit noise);
-        # keep only the tail, which is where the actual failure reason is.
-        detail = detail[-500:] if detail else "npm install failed."
-        return {"ok": False, "error": detail}
-
-    return {"ok": True, "error": ""}
+    return cli_runtime.npm_install_global(NPM_PACKAGE)
 
 
 def is_installed() -> bool:
     try:
         result = subprocess.run(
-            [COMMAND_CODE_BINARY, "--version"],
+            [_binary(), "--version"],
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -135,9 +147,11 @@ def get_status() -> dict[str, Any]:
             "error": "Command Code CLI is not installed. Install it with: npm i -g command-code",
         }
 
+    _adopt_existing_session()
+
     try:
         result = subprocess.run(
-            [COMMAND_CODE_BINARY, "status", "--json"],
+            [_binary(), "status", "--json"],
             capture_output=True,
             text=True,
             timeout=STATUS_TIMEOUT_SECONDS,
@@ -194,7 +208,7 @@ def list_models() -> list[str]:
     """
     try:
         result = subprocess.run(
-            [COMMAND_CODE_BINARY, "--list-models"],
+            [_binary(), "--list-models"],
             capture_output=True,
             text=True,
             timeout=STATUS_TIMEOUT_SECONDS,
@@ -239,8 +253,10 @@ def run_prompt(
     if not prompt:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
+    _adopt_existing_session()
+
     args = [
-        COMMAND_CODE_BINARY,
+        _binary(),
         "-p",
         prompt,
         "--output-format",

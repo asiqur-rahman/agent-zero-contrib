@@ -22,14 +22,12 @@ CURATED_MODELS = [
 PERSISTED_HOME_PATH = "/a0/usr/plugins/_oauth/command_code_cli/home"
 
 NOT_DRIVEN_MESSAGE = (
-    "Command Code sign-in is not driven from Agent Zero. On the machine "
-    "running Agent Zero, install the CLI (npm i -g command-code) and run "
-    "`command-code login` yourself, then click Refresh here. The shipped "
-    f"Docker image's docker exec shell already exports HOME={PERSISTED_HOME_PATH} "
-    "(see /root/.bashrc), so a plain `command-code login` there persists "
-    "correctly on its own -- only pass a HOME override yourself if running "
-    "natively outside Docker, or from a non-interactive shell that skips "
-    "/root/.bashrc."
+    "Command Code sign-in is not driven from Agent Zero. In a `docker exec` "
+    "shell on the machine running Agent Zero, run `command-code login`, then "
+    "click Refresh here. No HOME override is needed: a login left in any "
+    f"shell's default home is adopted into {PERSISTED_HOME_PATH} the first "
+    "time this page reads it, and the CLI binary itself is installed under "
+    "usr/ -- so both survive a container restart, image update, or recreate."
 )
 
 
@@ -147,10 +145,10 @@ class CommandCodeOAuthProvider:
                 "Agent Zero cannot sign Command Code out remotely -- it never "
                 "held the credential. Run `command-code logout` in a "
                 "docker exec shell on the machine running Agent Zero to sign "
-                f"out (it already exports HOME={PERSISTED_HOME_PATH}, same as "
-                "login -- use the same HOME override yourself if running "
-                "outside a docker exec shell, or logout will target the "
-                "wrong session)."
+                f"out. That shell exports HOME={PERSISTED_HOME_PATH}, the "
+                "session this provider reads; from a shell without it, pass "
+                "the same HOME override or logout will target a different "
+                "session and this page will still show connected."
             ),
         }
 

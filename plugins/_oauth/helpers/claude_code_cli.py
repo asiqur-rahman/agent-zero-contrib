@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from plugins._oauth.helpers import cli_runtime
+
 # Anthropic's Claude Code CLI (https://docs.claude.com/claude-code), like
 # Command Code, has no third-party OAuth/REST API -- this provider shells out
 # to the locally installed `claude` binary and drives its own headless print
@@ -22,12 +24,10 @@ from typing import Any
 # natively supports CLAUDE_CONFIG_DIR to relocate its config/credentials, so
 # this module points it at a directory under usr/ from the start.
 CLAUDE_BINARY = "claude"
-NPM_BINARY = "npm"
 NPM_PACKAGE = "@anthropic-ai/claude-code"
 VERSION_TIMEOUT_SECONDS = 5
 STATUS_TIMEOUT_SECONDS = 8
 RUN_TIMEOUT_SECONDS = 300
-INSTALL_TIMEOUT_SECONDS = 180
 
 
 def _persisted_config_dir() -> Path:
@@ -54,6 +54,44 @@ def credentials_path() -> Path:
         return _fallback_config_dir() / ".credentials.json"
 
 
+def adoptable_credential_paths() -> list[Path]:
+    """Non-persisted credential files _adopt_existing_credentials() may copy from.
+
+    Exposed so disconnect() can clear them too -- see
+    cli_runtime.purge_files() for why leaving them would make Disconnect a
+    no-op.
+    """
+    candidates = [home / ".claude" / ".credentials.json" for home in cli_runtime.default_homes()]
+    env_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if env_dir:
+        candidates.insert(0, Path(env_dir).expanduser() / ".credentials.json")
+    return candidates
+
+
+def _adopt_existing_credentials() -> None:
+    """Migrates a login left in a non-persisted config dir into the persisted one.
+
+    CLAUDE_CONFIG_DIR is a container-wide ENV in the shipped image, so a
+    `docker exec` login normally writes straight to the persisted
+    directory. It does not when the container predates that ENV, when the
+    image is not this repo's (a plain agent0ai/agent-zero with this
+    checkout bind-mounted), or when the login ran with the variable unset
+    -- in all of those the credential goes to `~/.claude`, which works
+    when checked by hand but is invisible here and is destroyed by the
+    next container recreate. Adopting it makes the persisted copy
+    authoritative from then on.
+    """
+    try:
+        target = credentials_path()
+    except Exception:
+        return
+    cli_runtime.adopt_file(target, adoptable_credential_paths())
+
+
+def _binary() -> str:
+    return cli_runtime.resolve_binary(CLAUDE_BINARY)
+
+
 def _cli_env() -> dict[str, str]:
     env = {**os.environ, "NO_COLOR": "1"}
     try:
@@ -64,66 +102,43 @@ def _cli_env() -> dict[str, str]:
         # back to the unmodified environment (no persisted config override)
         # rather than failing the whole CLI call over it.
         pass
-    return env
+    return cli_runtime.env_with_bin_path(env)
 
 
 def npm_available() -> bool:
-    try:
-        result = subprocess.run(
-            [NPM_BINARY, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=VERSION_TIMEOUT_SECONDS,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+    return cli_runtime.npm_available()
 
 
 def install_latest() -> dict[str, Any]:
-    """Runs `npm install -g @anthropic-ai/claude-code`.
+    """Installs `@anthropic-ai/claude-code@latest` into the persisted npm prefix.
 
     This only ever installs the CLI binary itself -- it never touches
     authentication. A successful install still requires the user to run
     `claude auth login` (or set ANTHROPIC_API_KEY) themselves; nothing here
     attempts to automate that, and it never will (see the module docstring).
+
+    The prefix is under usr/ (see cli_runtime.npm_prefix()) rather than
+    npm's default /usr/local, so the install survives a container
+    recreation -- otherwise every image update silently un-installs the CLI
+    and this provider reports "not installed" even though the persisted
+    login is still there.
     """
     if not npm_available():
         return {
             "ok": False,
             "error": "npm is not available on PATH. Install Node.js first, then retry.",
         }
-
-    try:
-        result = subprocess.run(
-            [NPM_BINARY, "install", "-g", NPM_PACKAGE],
-            capture_output=True,
-            text=True,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "error": f"npm install timed out after {INSTALL_TIMEOUT_SECONDS}s.",
-        }
-    except OSError as exc:
-        return {"ok": False, "error": f"Unable to run npm install: {exc}"}
-
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        detail = detail[-500:] if detail else "npm install failed."
-        return {"ok": False, "error": detail}
-
-    return {"ok": True, "error": ""}
+    return cli_runtime.npm_install_global(NPM_PACKAGE)
 
 
 def is_installed() -> bool:
     try:
         result = subprocess.run(
-            [CLAUDE_BINARY, "--version"],
+            [_binary(), "--version"],
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -133,10 +148,11 @@ def is_installed() -> bool:
 def _version() -> str:
     try:
         result = subprocess.run(
-            [CLAUDE_BINARY, "--version"],
+            [_binary(), "--version"],
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -176,6 +192,7 @@ def get_status() -> dict[str, Any]:
             "user": "Authenticated (ANTHROPIC_API_KEY)",
         }
 
+    _adopt_existing_credentials()
     path = credentials_path()
     try:
         if path.is_file() and path.stat().st_size > 0:
@@ -234,7 +251,9 @@ def run_prompt(
     if not prompt:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
-    args = [CLAUDE_BINARY, "-p", prompt, "--output-format", "json"]
+    _adopt_existing_credentials()
+
+    args = [_binary(), "-p", prompt, "--output-format", "json"]
     if model:
         args.extend(["--model", model])
 

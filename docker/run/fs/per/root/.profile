@@ -17,3 +17,9 @@ source /opt/venv/bin/activate
 # CURSOR_HOME, HOME is load-bearing for far more than one CLI's config.
 # Note: this also moves `cd ~`/`~` expansion in this shell to that path.
 export HOME="/a0/usr/plugins/_oauth/command_code_cli/home"
+
+# Persisted npm prefix for the _oauth plugin's external CLIs, plus the
+# `~/.local/bin`/`~/.cursor/bin` targets Cursor CLI's own installer writes
+# to under this relocated HOME -- so `command-code`, `claude` and `agent`
+# resolve here the same way they do for the run_ui service.
+export PATH="/a0/usr/plugins/_oauth/_cli/npm/bin:$HOME/.local/bin:$HOME/.cursor/bin:$PATH"

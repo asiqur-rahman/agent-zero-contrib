@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from plugins._oauth.helpers import cursor_cli
+from plugins._oauth.helpers import cli_runtime, cursor_cli
 from plugins._oauth.helpers.providers.base import CURSOR_PROVIDER_ID
 from plugins._oauth.helpers.providers.cursor import (
     CURATED_MODELS,
@@ -115,6 +115,7 @@ def test_get_status_not_authenticated_when_no_config_file(monkeypatch, tmp_path)
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [])
 
     status = cursor_cli.get_status()
     assert status["authenticated"] is False
@@ -147,7 +148,9 @@ def test_run_prompt_uses_plain_text_output_and_ignores_model(monkeypatch):
     assert result["usage"] == {}
 
     args = captured["args"]
-    assert args[0] == "agent"
+    # Resolved to an absolute path when the binary is found (Cursor's own
+    # installer target under the persisted HOME first, then PATH).
+    assert Path(args[0]).name.startswith("agent")
     assert args[1] == "-p"
     assert "--output-format" in args and "text" in args
     assert "gpt-5.1" not in args
@@ -223,6 +226,7 @@ def test_provider_disconnect_removes_owned_config_file(monkeypatch, tmp_path):
     monkeypatch.delenv("CURSOR_API_KEY", raising=False)
     monkeypatch.delenv("API_KEY_CURSOR", raising=False)
     monkeypatch.setattr(cursor_cli, "credentials_home", lambda: tmp_path)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [])
 
     config = tmp_path / "cli-config.json"
     config.write_text('{"authInfo":{"userId":1,"email":"user@example.com"}}')
@@ -231,6 +235,51 @@ def test_provider_disconnect_removes_owned_config_file(monkeypatch, tmp_path):
     result = provider.disconnect()
     assert result["disconnected"] is True
     assert not config.exists()
+
+
+def test_provider_disconnect_also_clears_adoptable_stray_config(monkeypatch, tmp_path):
+    # Same reason as the Claude Code case: leaving the stray copy would let
+    # the next status read re-adopt it and undo the disconnect.
+    monkeypatch.delenv("CURSOR_API_KEY", raising=False)
+    monkeypatch.delenv("API_KEY_CURSOR", raising=False)
+    stray_home = tmp_path / "root"
+    (stray_home / ".cursor").mkdir(parents=True)
+    stray = stray_home / ".cursor" / "cli-config.json"
+    stray.write_text('{"authInfo":{"userId":1,"email":"user@example.com"}}')
+
+    persisted = tmp_path / "persisted"
+    persisted.mkdir()
+    config = persisted / "cli-config.json"
+    config.write_text('{"authInfo":{"userId":1,"email":"user@example.com"}}')
+
+    monkeypatch.setattr(cursor_cli, "credentials_home", lambda: persisted)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    result = CursorCliOAuthProvider().disconnect()
+    assert result["disconnected"] is True
+    assert not config.exists()
+    assert not stray.exists()
+
+    monkeypatch.setattr(cursor_cli, "is_installed", lambda: True)
+    monkeypatch.setattr(cursor_cli, "_version", lambda: "2026.09.02-c22c1a3")
+    assert cursor_cli.get_status()["authenticated"] is False
+
+
+def test_adopt_existing_config_migrates_login_from_default_home(monkeypatch, tmp_path):
+    # `agent login` in a shell without the relocated HOME writes to
+    # /root/.cursor -- readable by hand, invisible here, and destroyed by
+    # the next container recreate unless it is adopted.
+    stray_home = tmp_path / "root"
+    (stray_home / ".cursor").mkdir(parents=True)
+    (stray_home / ".cursor" / "cli-config.json").write_text('{"authInfo":{"email":"a@b.c"}}')
+
+    persisted = tmp_path / "persisted"
+    monkeypatch.setattr(cursor_cli, "credentials_home", lambda: persisted)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    cursor_cli._adopt_existing_config()
+
+    assert (persisted / "cli-config.json").read_text() == '{"authInfo":{"email":"a@b.c"}}'
 
 
 def test_provider_disconnect_refuses_when_env_api_key_set(monkeypatch):

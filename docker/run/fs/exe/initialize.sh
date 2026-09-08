@@ -66,6 +66,13 @@ mkdir -p "${CLAUDE_CONFIG_DIR:-/a0/usr/plugins/_oauth/claude_code_cli/config}"
 # missing parent directory tree.
 mkdir -p /a0/usr/plugins/_oauth/command_code_cli/home
 
+# And the persisted npm prefix external CLIs are installed into, so the
+# install survives a container recreate instead of vanishing with
+# /usr/local's writable layer -- the reason a configured Command Code /
+# Claude Code account kept coming back as "not installed"/disconnected.
+# See plugins/_oauth/helpers/cli_runtime.py.
+mkdir -p /a0/usr/plugins/_oauth/_cli/npm/bin
+
 # allow execution of /root/.bashrc and /root/.profile
 chmod 444 /root/.bashrc
 chmod 444 /root/.profile
