@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from plugins._oauth.helpers import cli_runtime
+from plugins._oauth.helpers import cli_prompt, cli_runtime
 
 # Anthropic's Claude Code CLI (https://docs.claude.com/claude-code), like
 # Command Code, has no third-party OAuth/REST API -- this provider shells out
@@ -239,23 +239,33 @@ def run_prompt(
     Spawns `claude -p <prompt> --output-format json [--model <model>]` and
     reads the terminal result object's `result`/`is_error`/`usage` fields --
     the documented shape of Claude Code's non-streaming `--output-format
-    json` mode. No tool permissions are granted (no --allowedTools /
-    --permission-mode flags), so this behaves as a plain text completion
-    the same way Command Code's `-p` does, not an agentic coding run.
+    json` mode. This behaves as a plain text completion the same way Command
+    Code's `-p` does, not an agentic coding run: no --permission-mode is
+    passed, and the only tool ever allowed is Read, only on turns that
+    carry an image attachment (see cli_prompt.py -- the CLI has to open the
+    image off disk, because its headless mode takes one text argument).
 
     Each call is a fresh, stateless prompt (no `--resume` / `--continue`):
     Agent Zero sends its full conversation state on every turn, the same
     reasoning already documented in command_code_cli.run_prompt().
     """
-    prompt = _flatten_messages(messages)
-    if not prompt:
+    prompt = cli_prompt.build_prompt(messages)
+    if not prompt.has_content:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
     _adopt_existing_credentials()
 
-    args = [_binary(), "-p", prompt, "--output-format", "json"]
+    args = [_binary(), "-p", prompt.text, "--output-format", "json"]
     if model:
         args.extend(["--model", model])
+    if prompt.image_paths:
+        # The one tool this provider ever grants, and only when the request
+        # actually carries an attachment: without it the CLI cannot open the
+        # image files the prompt points at, and the turn degrades to the
+        # same silent drop this replaced. Read is read-only and no
+        # --permission-mode is passed (bypassPermissions is rejected under
+        # root anyway, see the orchestrator's claude.md reference).
+        args.extend(["--allowedTools", "Read"])
 
     try:
         result = subprocess.run(
@@ -274,6 +284,8 @@ def run_prompt(
         }
     except OSError as exc:
         return {"ok": False, "text": "", "error": f"Unable to run claude: {exc}", "usage": {}}
+    finally:
+        prompt.cleanup()
 
     payload = _parse_result_json(result.stdout)
     if payload is None:
@@ -288,32 +300,6 @@ def run_prompt(
 
     error = text or "claude reported an error."
     return {"ok": False, "text": "", "error": error, "usage": usage}
-
-
-def _flatten_messages(messages: list[dict[str, Any]]) -> str:
-    """Flattens an OpenAI-style messages array into one prompt string.
-
-    Claude Code's headless `-p` mode takes a single prompt argument, not a
-    messages array -- same reasoning as command_code_cli._flatten_messages().
-    """
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "user")
-        content = message.get("content")
-        if isinstance(content, list):
-            text = "".join(
-                str(part.get("text") or "") for part in content if isinstance(part, dict)
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if not text:
-            continue
-        label = {"system": "System", "assistant": "Assistant"}.get(role, "User")
-        parts.append(f"[{label}]\n{text}")
-    return "\n\n".join(parts)
 
 
 def _parse_result_json(stdout: str) -> dict[str, Any] | None:

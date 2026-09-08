@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,10 @@ from plugins._oauth.helpers.providers.command_code import (
     CommandCodeOAuthProvider,
 )
 
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-pixels"
+PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode()
 
 class FakeCompletedProcess:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
@@ -445,3 +450,57 @@ def test_provider_registers_routes_without_duplicate(monkeypatch):
     ) == 1
     assert "oauth_command_code_health" in app.view_functions
     assert "oauth_command_code_models" in app.view_functions
+
+
+def test_run_prompt_passes_attached_images_to_the_cli(monkeypatch):
+    # Image parts used to be dropped on the floor here: only `part["text"]`
+    # was read, so an attachment never reached the CLI at all.
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["image_exists"] = Path(args[2].splitlines()[-1].split(". ", 1)[1]).is_file()
+        return FakeCompletedProcess(
+            0, '{"type":"result","subtype":"success","finalText":"a cat"}\n'
+        )
+
+    monkeypatch.setattr(command_code_cli.subprocess, "run", fake_run)
+
+    result = command_code_cli.run_prompt(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
+                ],
+            }
+        ]
+    )
+
+    assert result["ok"] is True
+    prompt = captured["args"][2]
+    assert "What is in this image?" in prompt
+    assert "[Attached image]" in prompt
+    # The file has to exist while the CLI is running, and be cleaned up after.
+    assert captured["image_exists"] is True
+    referenced = Path(prompt.splitlines()[-1].split(". ", 1)[1])
+    assert not referenced.parent.exists()
+
+
+def test_run_prompt_sends_an_image_only_message_instead_of_erroring(monkeypatch):
+    # vision_load's after_execution() appends a history message of image
+    # parts with no text -- that used to flatten to "" and fail the turn.
+    monkeypatch.setattr(
+        command_code_cli.subprocess,
+        "run",
+        lambda *a, **k: FakeCompletedProcess(
+            0, '{"type":"result","subtype":"success","finalText":"ok"}\n'
+        ),
+    )
+
+    result = command_code_cli.run_prompt(
+        [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": PNG_DATA_URL}}]}]
+    )
+    assert result["ok"] is True
+    assert result["text"] == "ok"

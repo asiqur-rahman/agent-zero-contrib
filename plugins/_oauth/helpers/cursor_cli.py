@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from plugins._oauth.helpers import cli_runtime
+from plugins._oauth.helpers import cli_prompt, cli_runtime
 
 # Cursor CLI (https://cursor.com/cli) also publishes no third-party
 # OAuth/REST API -- this provider shells out to the locally installed
@@ -250,16 +250,20 @@ def run_prompt(
     Plain text output is used rather than --output-format json because
     this provider has no confirmed JSON result schema to parse against
     (unlike Command Code and Claude Code, both verified against real CLI
-    output); usage stats are therefore always empty.
+    output); usage stats are therefore always empty. Image parts are
+    written to a temporary directory and referenced by absolute path in the
+    prompt, same as the other two -- see cli_prompt.py. No tool-permission
+    flag is passed: Cursor CLI has no confirmed equivalent of Claude Code's
+    --allowedTools, so whether it opens the file is left to the CLI.
     """
     del model
-    prompt = _flatten_messages(messages)
-    if not prompt:
+    prompt = cli_prompt.build_prompt(messages)
+    if not prompt.has_content:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
     _adopt_existing_config()
 
-    args = [_binary(), "-p", "--output-format", "text", prompt]
+    args = [_binary(), "-p", "--output-format", "text", prompt.text]
 
     try:
         result = subprocess.run(
@@ -278,6 +282,8 @@ def run_prompt(
         }
     except OSError as exc:
         return {"ok": False, "text": "", "error": f"Unable to run agent: {exc}", "usage": {}}
+    finally:
+        prompt.cleanup()
 
     if result.returncode == 0:
         return {"ok": True, "text": (result.stdout or "").strip(), "error": "", "usage": {}}
@@ -286,27 +292,3 @@ def run_prompt(
     return {"ok": False, "text": "", "error": detail, "usage": {}}
 
 
-def _flatten_messages(messages: list[dict[str, Any]]) -> str:
-    """Flattens an OpenAI-style messages array into one prompt string.
-
-    Cursor CLI's headless `-p` mode takes a single prompt argument, not a
-    messages array -- same reasoning as command_code_cli/claude_code_cli.
-    """
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "user")
-        content = message.get("content")
-        if isinstance(content, list):
-            text = "".join(
-                str(part.get("text") or "") for part in content if isinstance(part, dict)
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if not text:
-            continue
-        label = {"system": "System", "assistant": "Assistant"}.get(role, "User")
-        parts.append(f"[{label}]\n{text}")
-    return "\n\n".join(parts)

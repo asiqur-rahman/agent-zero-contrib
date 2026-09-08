@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from plugins._oauth.helpers import cli_runtime
+from plugins._oauth.helpers import cli_prompt, cli_runtime
 
 # Command Code (https://commandcode.ai) has no published REST/OAuth API --
 # unlike Codex/GitHub Copilot/Gemini/xAI Grok, which this plugin drives via a
@@ -238,6 +238,11 @@ def run_prompt(
 ) -> dict[str, Any]:
     """Runs one stateless Command Code headless turn and returns its result.
 
+    Image parts in `messages` are written to a temporary directory and
+    referenced by absolute path in the prompt -- see cli_prompt.py for why
+    that is the only way to get an attachment through a CLI whose headless
+    mode takes a single text argument.
+
     Spawns `command-code -p <prompt> --output-format json --no-auto-update
     --skip-onboarding [-m <model>]` and reads the terminal NDJSON
     `{"type":"result",...}` frame's `finalText`/`error`/`usage` -- shape
@@ -249,8 +254,8 @@ def run_prompt(
     every model backend it talks to, sends its full conversation state on
     every turn, so session continuity is unnecessary here.
     """
-    prompt = _flatten_messages(messages)
-    if not prompt:
+    prompt = cli_prompt.build_prompt(messages)
+    if not prompt.has_content:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
     _adopt_existing_session()
@@ -258,7 +263,7 @@ def run_prompt(
     args = [
         _binary(),
         "-p",
-        prompt,
+        prompt.text,
         "--output-format",
         "json",
         "--no-auto-update",
@@ -280,6 +285,8 @@ def run_prompt(
         }
     except OSError as exc:
         return {"ok": False, "text": "", "error": f"Unable to run command-code: {exc}", "usage": {}}
+    finally:
+        prompt.cleanup()
 
     frame = _last_result_frame(result.stdout)
     if frame is None:
@@ -293,32 +300,6 @@ def run_prompt(
 
     error = str(frame.get("error") or "command-code reported an error.")
     return {"ok": False, "text": final_text, "error": error, "usage": usage}
-
-
-def _flatten_messages(messages: list[dict[str, Any]]) -> str:
-    """Flattens an OpenAI-style messages array into one prompt string.
-
-    Command Code's headless `-p` mode takes a single prompt argument, not a
-    messages array.
-    """
-    parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = str(message.get("role") or "user")
-        content = message.get("content")
-        if isinstance(content, list):
-            text = "".join(
-                str(part.get("text") or "") for part in content if isinstance(part, dict)
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if not text:
-            continue
-        label = {"system": "System", "assistant": "Assistant"}.get(role, "User")
-        parts.append(f"[{label}]\n{text}")
-    return "\n\n".join(parts)
 
 
 def _last_result_frame(stdout: str) -> dict[str, Any] | None:

@@ -14,6 +14,8 @@
 - `api/` owns provider-aware settings modal endpoints such as status, login start, polling, manual callback, models, and disconnect.
 - `helpers/providers/` owns provider implementations, provider metadata, registry wiring, token storage helpers, and provider-specific endpoint validation.
 - `helpers/command_code_cli.py` owns the Command Code CLI subprocess contract (install/status checks, headless prompt execution) consumed by `helpers/providers/command_code.py`. This is the one provider in this plugin with no OAuth handshake -- see its module docstring and `plugins/_oauth/README.md` for why.
+- `helpers/cli_runtime.py` owns persistence for the external-CLI providers (Command Code, Claude Code, Cursor CLI): the persisted npm prefix installs target, binary resolution order, PATH injection, and adoption of a login left in a non-persisted default home. Those providers hold no credential of their own, so both the binary and the credential must survive a container recreate -- only `/a0/usr` does.
+- `helpers/cli_prompt.py` owns messages -> single-prompt flattening for those three providers, including materialising `image_url` parts to temp files the CLI can read. Do not reintroduce a per-provider `_flatten_messages()` copy; the text-only version of that loop is what silently dropped every image attachment.
 - `helpers/summary.py` owns the shared provider-status/account summary shape consumed by the status API, discovery cards, onboarding, and OAuth settings UI.
 - `helpers/routes.py` owns local OAuth callback and OpenAI-compatible proxy routes mounted by the route bootstrap extension.
 - `webui/config.html` and `webui/oauth-config-store.js` own the OAuth Connections settings UI.
@@ -36,6 +38,8 @@
 - `helpers/providers/registry.py` is the source of truth for connectable OAuth providers.
 - The models API must preserve the legacy plain `models` slug list and may add `model_metadata` entries for richer provider catalogs.
 - OAuth provider config must not expose the dummy `oauth` API key in `conf/model_providers.yaml`; the dummy key is a runtime-only shim supplied by the `get_api_key` extension after the account provider reports connected.
+- External-CLI providers must install into the persisted npm prefix and resolve binaries through `cli_runtime`, never through a bare `PATH` lookup against npm's default `/usr/local` prefix -- that prefix is discarded on every container recreate. Credential adoption must never overwrite an existing persisted session, and `disconnect()` must clear the adoptable stray copies too, or the next status read re-adopts them.
+- External-CLI providers must pass image parts through to the CLI as files referenced in the prompt, not drop them. Claude Code may grant `--allowedTools Read` for that, and only on turns that carry an image; do not grant tools on text-only turns and do not pass `--permission-mode`. Never fetch a remote `http(s)` image URL.
 - Usage-plan metadata belongs only to connectable providers. Do not add metadata-only subscription families for providers this plugin cannot connect.
 - API handlers should remain provider-aware. Missing or blank `provider_id` defaults to Codex only for existing backward compatibility; falsey non-string IDs must not silently default.
 - Codex success contracts must preserve legacy fields such as `account_id` while allowing newer fields such as `account_label`.

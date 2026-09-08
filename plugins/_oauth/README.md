@@ -70,6 +70,15 @@ OAuth-backed model providers do not require users to enter API keys. Agent Zero 
 - Completions use `--output-format text`, not `--output-format json` -- there is no confirmed JSON result schema for this CLI to parse against (unlike Command Code and Claude Code, both verified against real CLI output), so usage stats are always empty.
 - "Disconnect" removes `cli-config.json` -- safe because Cursor's own `.cursor/` subdirectory under the shared `HOME` is exclusively its own, even though the parent directory is shared with Command Code.
 
+## Images In Messages (external-CLI providers)
+
+All three external-CLI providers (Command Code, Claude Code, Cursor CLI) take a **single text prompt** in headless mode (`-p "<prompt>"`), not a messages array, so a conversation is flattened into one string by `helpers/cli_prompt.py`.
+
+- That flattening used to read only `part["text"]`, which silently dropped every `image_url` part Agent Zero sends. Two visible failure modes came out of it: as the **chat model** an attached image just vanished and the model answered as if nothing had been sent; as the **vision model** `tools/vision_load.py` got nothing back and raised `Vision Model returned an empty response.` -- and that tool's own `after_execution()` appends a history message whose content is image parts with *no text*, which flattened to `""` and could fail the turn outright with `No prompt content to send.`
+- These CLIs cannot take pixels on a command line, but they are agentic coding tools that can read files. So every image part is now decoded (`data:` URLs, and the plain filesystem paths `vision_load` passes through) into a temporary directory and referenced by absolute path in an `[Attached image]` section of the prompt. The directory is removed as soon as the CLI exits, and originals are copied rather than referenced in place, so cleanup can never touch a user's file. Remote `http(s)` image URLs are deliberately **not** fetched -- that would be an outbound request from a URL this plugin did not choose.
+- **Claude Code** is passed `--allowedTools Read` on those turns only, so it can actually open the files; text-only turns still grant no tools at all, and no `--permission-mode` is ever passed (`bypassPermissions` is rejected under root anyway). **Command Code** and **Cursor CLI** have no confirmed equivalent flag, so whether they open the referenced file is left to the CLI -- if one declines, the answer says it could not read the image rather than the attachment being dropped or the turn erroring.
+- Enable the model's **Vision** toggle in settings for images to be sent at all: `helpers/history.py` embeds no images when `vision` is false, regardless of what this plugin supports.
+
 ## Usage Plan Metadata
 
 The status API exposes `usage_plan_catalog` for subscription and billing context. It covers only connectable providers: Codex, GitHub Copilot, Google Cloud Gemini, and xAI Grok. Command Code, Claude Code, and Cursor CLI are not included -- their billing/tier metadata isn't published anywhere this plugin can read.
