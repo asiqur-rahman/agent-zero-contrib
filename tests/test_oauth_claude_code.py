@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,10 @@ from plugins._oauth.helpers.providers.claude_code import (
     ClaudeCodeOAuthProvider,
 )
 
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-pixels"
+PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode()
 
 class FakeCompletedProcess:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
@@ -440,3 +445,50 @@ def test_provider_registers_routes_without_duplicate(monkeypatch):
     ) == 1
     assert "oauth_claude_code_health" in app.view_functions
     assert "oauth_claude_code_models" in app.view_functions
+
+
+def test_run_prompt_grants_read_only_when_an_image_is_attached(monkeypatch):
+    # Without Read the CLI cannot open the image file the prompt points at,
+    # so the attachment would be as good as dropped again. It must stay off
+    # for ordinary text turns, which need no tools at all.
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured.setdefault("calls", []).append(args)
+        return FakeCompletedProcess(0, '{"result":"a cat","is_error":false}')
+
+    monkeypatch.setattr(claude_code_cli.subprocess, "run", fake_run)
+
+    claude_code_cli.run_prompt([{"role": "user", "content": "Say hi"}])
+    assert "--allowedTools" not in captured["calls"][0]
+
+    claude_code_cli.run_prompt(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
+                ],
+            }
+        ]
+    )
+    args = captured["calls"][1]
+    assert args[args.index("--allowedTools") + 1] == "Read"
+    prompt = args[2]
+    assert "What is in this image?" in prompt
+    assert "[Attached image]" in prompt
+
+
+def test_run_prompt_sends_an_image_only_message_instead_of_erroring(monkeypatch):
+    monkeypatch.setattr(
+        claude_code_cli.subprocess,
+        "run",
+        lambda *a, **k: FakeCompletedProcess(0, '{"result":"ok","is_error":false}'),
+    )
+
+    result = claude_code_cli.run_prompt(
+        [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": PNG_DATA_URL}}]}]
+    )
+    assert result["ok"] is True
+    assert result["text"] == "ok"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,10 @@ from plugins._oauth.helpers.providers.cursor import (
     CursorCliOAuthProvider,
 )
 
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-pixels"
+PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode()
 
 class FakeCompletedProcess:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
@@ -359,3 +364,30 @@ def test_provider_registers_routes_without_duplicate(monkeypatch):
     ) == 1
     assert "oauth_cursor_cli_health" in app.view_functions
     assert "oauth_cursor_cli_models" in app.view_functions
+
+
+def test_run_prompt_passes_attached_images_to_the_cli(monkeypatch):
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return FakeCompletedProcess(0, "a cat\n")
+
+    monkeypatch.setattr(cursor_cli.subprocess, "run", fake_run)
+
+    result = cursor_cli.run_prompt(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is in this image?"},
+                    {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
+                ],
+            }
+        ]
+    )
+
+    assert result["ok"] is True
+    prompt = captured["args"][-1]
+    assert "What is in this image?" in prompt
+    assert "[Attached image]" in prompt
