@@ -25,13 +25,13 @@ CURATED_MODELS = [
 PERSISTED_CONFIG_DIR_PATH = "/a0/usr/plugins/_oauth/claude_code_cli/config"
 
 NOT_DRIVEN_MESSAGE = (
-    "Claude Code sign-in is not driven from Agent Zero. On the machine "
-    "running Agent Zero, install the CLI (npm i -g @anthropic-ai/claude-code) "
-    "and run `claude auth login` yourself (or set ANTHROPIC_API_KEY), then "
-    "click Refresh here. The shipped Docker image already sets "
-    f"CLAUDE_CONFIG_DIR={PERSISTED_CONFIG_DIR_PATH}, so a plain `claude auth "
-    "login` in a `docker exec` shell persists correctly on its own -- only "
-    "export CLAUDE_CONFIG_DIR yourself if running natively outside Docker."
+    "Claude Code sign-in is not driven from Agent Zero. In a `docker exec` "
+    "shell on the machine running Agent Zero, run `claude auth login` (or "
+    "set ANTHROPIC_API_KEY), then click Refresh here. No CLAUDE_CONFIG_DIR "
+    "export is needed: a credential left in a default `~/.claude` is adopted "
+    f"into {PERSISTED_CONFIG_DIR_PATH} the first time this page reads it, "
+    "and the CLI binary itself is installed under usr/ -- so both survive a "
+    "container restart, image update, or recreate."
 )
 
 
@@ -150,9 +150,18 @@ class ClaudeCodeOAuthProvider:
                 "disconnected": False,
                 "note": "ANTHROPIC_API_KEY is set in the environment. Unset it to sign out.",
             }
-        path = claude_code_cli.credentials_path()
-        if path.exists():
-            path.unlink()
+        # Any stray copy in a default `~/.claude` has to go too, or
+        # get_status() would simply re-adopt it on the next read and this
+        # Disconnect would look like a no-op (see
+        # claude_code_cli.adoptable_credential_paths()). That does sign the
+        # CLI out for other users of that same home directory -- which is
+        # what Disconnect means here, and matches `claude logout`.
+        from plugins._oauth.helpers import cli_runtime
+
+        removed = cli_runtime.purge_files(
+            [claude_code_cli.credentials_path(), *claude_code_cli.adoptable_credential_paths()]
+        )
+        if removed:
             return {"disconnected": True}
         return {"disconnected": False, "note": "No Claude Code credentials found."}
 

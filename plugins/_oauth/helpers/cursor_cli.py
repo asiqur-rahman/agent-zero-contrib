@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from plugins._oauth.helpers import cli_runtime
+
 # Cursor CLI (https://cursor.com/cli) also publishes no third-party
 # OAuth/REST API -- this provider shells out to the locally installed
 # `agent` binary the same way Command Code/Claude Code do, using the
@@ -70,26 +72,65 @@ def config_path() -> Path:
     return credentials_home() / "cli-config.json"
 
 
+def adoptable_config_paths() -> list[Path]:
+    """Non-persisted config files _adopt_existing_config() may copy from.
+
+    Exposed so disconnect() can clear them too -- see
+    cli_runtime.purge_files() for why leaving them would make Disconnect a
+    no-op.
+    """
+    return [home / ".cursor" / "cli-config.json" for home in cli_runtime.default_homes()]
+
+
+def _adopt_existing_config() -> None:
+    """Migrates a login left in a non-persisted `$HOME` into the persisted one.
+
+    Cursor CLI only ever reads `$HOME/.cursor/cli-config.json`, so an
+    `agent login` run without the relocated HOME exported -- e.g. from
+    `docker exec <c> bash -c ...`, which is non-interactive and so never
+    sources /root/.bashrc -- writes to /root/.cursor. That login works
+    when checked by hand in a shell, but is invisible to this module and
+    is destroyed by the next container recreate. Adopting it makes the
+    persisted copy authoritative from then on.
+    """
+    try:
+        target = config_path()
+    except Exception:
+        return
+    cli_runtime.adopt_file(target, adoptable_config_paths())
+
+
+def _binary() -> str:
+    try:
+        home = _shared_cli_home()
+    except Exception:
+        home = None
+    return cli_runtime.resolve_binary(CURSOR_BINARY, home=home)
+
+
 def _cli_env() -> dict[str, str]:
     env = {**os.environ, "NO_COLOR": "1"}
+    home: Path | None = None
     try:
-        env["HOME"] = str(_shared_cli_home())
+        home = _shared_cli_home()
+        env["HOME"] = str(home)
     except Exception:
         # provider_data_dir() imports the full Agent Zero `helpers.files`
         # module, which is not available in isolated unit-test runs -- fall
         # back to the unmodified environment rather than failing the whole
         # CLI call over it.
         pass
-    return env
+    return cli_runtime.env_with_bin_path(env, home=home)
 
 
 def is_installed() -> bool:
     try:
         result = subprocess.run(
-            [CURSOR_BINARY, "--version"],
+            [_binary(), "--version"],
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -99,10 +140,11 @@ def is_installed() -> bool:
 def _version() -> str:
     try:
         result = subprocess.run(
-            [CURSOR_BINARY, "--version"],
+            [_binary(), "--version"],
             capture_output=True,
             text=True,
             timeout=VERSION_TIMEOUT_SECONDS,
+            env=_cli_env(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -140,6 +182,8 @@ def get_status() -> dict[str, Any]:
             "version": version,
             "user": f"Authenticated ({env_var})",
         }
+
+    _adopt_existing_config()
 
     path = config_path()
     try:
@@ -213,7 +257,9 @@ def run_prompt(
     if not prompt:
         return {"ok": False, "text": "", "error": "No prompt content to send.", "usage": {}}
 
-    args = [CURSOR_BINARY, "-p", "--output-format", "text", prompt]
+    _adopt_existing_config()
+
+    args = [_binary(), "-p", "--output-format", "text", prompt]
 
     try:
         result = subprocess.run(

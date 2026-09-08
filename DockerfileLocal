@@ -17,6 +17,17 @@ ENV BRANCH=$BRANCH
 # (shared with Command Code's own HOME relocation there), not here.
 ENV CLAUDE_CONFIG_DIR=/a0/usr/plugins/_oauth/claude_code_cli/config
 
+# Put the persisted npm prefix the _oauth plugin installs external CLIs into
+# (Command Code, Claude Code) on PATH container-wide. `npm install -g`'s
+# default /usr/local prefix lives in the container's writable layer, which
+# is discarded on every recreate (image update, CasaOS app update,
+# `docker compose up --force-recreate`) -- so a CLI installed once came
+# back "not installed" and every account showed disconnected. Installing
+# into usr/ instead keeps the binary across recreates, and this PATH entry
+# is what makes it visible to supervisord's own run_ui service, not just to
+# an interactive shell. See plugins/_oauth/helpers/cli_runtime.py.
+ENV PATH=/a0/usr/plugins/_oauth/_cli/npm/bin:$PATH
+
 # Copy filesystem files to root
 COPY ./docker/run/fs/ /
 # Copy current development files to git, they will only be used in "local" branch

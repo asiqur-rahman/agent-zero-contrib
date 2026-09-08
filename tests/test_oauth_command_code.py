@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from plugins._oauth.helpers import command_code_cli
+from plugins._oauth.helpers import cli_runtime, command_code_cli
 from plugins._oauth.helpers.providers.base import COMMAND_CODE_PROVIDER_ID
 from plugins._oauth.helpers.providers.command_code import (
     CURATED_MODELS,
@@ -147,7 +147,9 @@ def test_run_prompt_flattens_messages_and_passes_them_as_single_arg(monkeypatch)
     assert result["usage"] == {"inputTokens": 10, "outputTokens": 5}
 
     args = captured["args"]
-    assert args[0] == "command-code"
+    # Resolved to an absolute path when the binary is found (persisted npm
+    # prefix first, then PATH) -- only the program itself is asserted here.
+    assert Path(args[0]).name.startswith("command-code")
     assert args[1] == "-p"
     assert "[System]\nBe terse." in args[2]
     assert "[User]\nSay hi" in args[2]
@@ -272,7 +274,11 @@ def test_install_latest_skips_npm_call_when_npm_missing(monkeypatch):
     assert "Install Node.js first" in result["error"]
 
 
-def test_install_latest_runs_npm_install_dash_g_latest(monkeypatch):
+def test_install_latest_installs_into_persisted_prefix(monkeypatch, tmp_path):
+    # The install must land under usr/, not npm's default /usr/local prefix:
+    # /usr/local lives in the container's writable layer and is discarded on
+    # every container recreate, which made a configured account come back as
+    # "not installed" and disconnected.
     captured: dict = {}
 
     def fake_run(args, **kwargs):
@@ -280,17 +286,43 @@ def test_install_latest_runs_npm_install_dash_g_latest(monkeypatch):
         return FakeCompletedProcess(0, "added 1 package\n")
 
     monkeypatch.setattr(command_code_cli, "npm_available", lambda: True)
-    monkeypatch.setattr(command_code_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_runtime, "npm_available", lambda: True)
+    monkeypatch.setattr(cli_runtime, "npm_prefix", lambda: tmp_path / "npm")
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
 
     result = command_code_cli.install_latest()
     assert result["ok"] is True
+    assert captured["args"] == [
+        "npm",
+        "install",
+        "-g",
+        "--prefix",
+        str(tmp_path / "npm"),
+        "command-code@latest",
+    ]
+
+
+def test_install_latest_falls_back_to_default_prefix_without_usr(monkeypatch):
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return FakeCompletedProcess(0, "added 1 package\n")
+
+    monkeypatch.setattr(command_code_cli, "npm_available", lambda: True)
+    monkeypatch.setattr(cli_runtime, "npm_available", lambda: True)
+    monkeypatch.setattr(cli_runtime, "npm_prefix", lambda: None)
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
+
+    assert command_code_cli.install_latest()["ok"] is True
     assert captured["args"] == ["npm", "install", "-g", "command-code@latest"]
 
 
 def test_install_latest_surfaces_npm_failure(monkeypatch):
     monkeypatch.setattr(command_code_cli, "npm_available", lambda: True)
+    monkeypatch.setattr(cli_runtime, "npm_available", lambda: True)
     monkeypatch.setattr(
-        command_code_cli.subprocess,
+        cli_runtime.subprocess,
         "run",
         lambda *a, **k: FakeCompletedProcess(1, "", "EACCES: permission denied\n"),
     )
@@ -298,6 +330,46 @@ def test_install_latest_surfaces_npm_failure(monkeypatch):
     result = command_code_cli.install_latest()
     assert result["ok"] is False
     assert "EACCES" in result["error"]
+
+
+def test_adopt_existing_session_migrates_login_from_default_home(monkeypatch, tmp_path):
+    # A `command-code login` run without the relocated HOME exported (e.g.
+    # `docker exec <c> bash -c ...`, which never sources /root/.bashrc)
+    # writes to /root/.commandcode -- readable by hand in a shell, but
+    # invisible here and destroyed by the next container recreate. It must
+    # be adopted into the persisted directory instead of ignored.
+    stray_home = tmp_path / "root"
+    (stray_home / ".commandcode").mkdir(parents=True)
+    (stray_home / ".commandcode" / "session.json").write_text('{"token":"fake"}')
+
+    persisted = tmp_path / "persisted"
+    monkeypatch.setattr(command_code_cli, "_persisted_home", lambda: persisted)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    command_code_cli._adopt_existing_session()
+
+    adopted = persisted / ".commandcode" / "session.json"
+    assert adopted.is_file()
+    assert adopted.read_text() == '{"token":"fake"}'
+
+
+def test_adopt_existing_session_never_overwrites_persisted_login(monkeypatch, tmp_path):
+    # The persisted copy is the one the CLI refreshes its token into, so a
+    # stale stray login must never clobber it.
+    stray_home = tmp_path / "root"
+    (stray_home / ".commandcode").mkdir(parents=True)
+    (stray_home / ".commandcode" / "session.json").write_text('{"token":"stale"}')
+
+    persisted = tmp_path / "persisted"
+    (persisted / ".commandcode").mkdir(parents=True)
+    (persisted / ".commandcode" / "session.json").write_text('{"token":"fresh"}')
+
+    monkeypatch.setattr(command_code_cli, "_persisted_home", lambda: persisted)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    command_code_cli._adopt_existing_session()
+
+    assert (persisted / ".commandcode" / "session.json").read_text() == '{"token":"fresh"}'
 
 
 def test_provider_disconnect_never_shells_out_to_logout():

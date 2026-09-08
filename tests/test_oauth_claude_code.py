@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from plugins._oauth.helpers import claude_code_cli
+from plugins._oauth.helpers import claude_code_cli, cli_runtime
 from plugins._oauth.helpers.providers.base import CLAUDE_CODE_PROVIDER_ID
 from plugins._oauth.helpers.providers.claude_code import (
     CURATED_MODELS,
@@ -76,6 +76,7 @@ def test_get_status_not_authenticated_when_no_credentials(monkeypatch, tmp_path)
     monkeypatch.setattr(claude_code_cli, "_version", lambda: "2.1.0")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(claude_code_cli, "credentials_path", lambda: tmp_path / ".credentials.json")
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [])
 
     status = claude_code_cli.get_status()
     assert status["authenticated"] is False
@@ -115,7 +116,9 @@ def test_run_prompt_flattens_messages_and_passes_them_as_single_arg(monkeypatch)
     assert result["usage"] == {"input_tokens": 10, "output_tokens": 5}
 
     args = captured["args"]
-    assert args[0] == "claude"
+    # Resolved to an absolute path when the binary is found (persisted npm
+    # prefix first, then PATH) -- only the program itself is asserted here.
+    assert Path(args[0]).name.startswith("claude")
     assert args[1] == "-p"
     assert "[System]\nBe terse." in args[2]
     assert "[User]\nSay hi" in args[2]
@@ -259,7 +262,10 @@ def test_install_latest_skips_npm_call_when_npm_missing(monkeypatch):
     assert "Install Node.js first" in result["error"]
 
 
-def test_install_latest_runs_npm_install_dash_g_latest(monkeypatch):
+def test_install_latest_installs_into_persisted_prefix(monkeypatch, tmp_path):
+    # Same reasoning as the Command Code case: npm's default /usr/local
+    # prefix is discarded on a container recreate, so the install has to go
+    # under usr/ or the CLI silently un-installs itself on every update.
     captured: dict = {}
 
     def fake_run(args, **kwargs):
@@ -267,11 +273,59 @@ def test_install_latest_runs_npm_install_dash_g_latest(monkeypatch):
         return FakeCompletedProcess(0, "added 1 package\n")
 
     monkeypatch.setattr(claude_code_cli, "npm_available", lambda: True)
-    monkeypatch.setattr(claude_code_cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_runtime, "npm_available", lambda: True)
+    monkeypatch.setattr(cli_runtime, "npm_prefix", lambda: tmp_path / "npm")
+    monkeypatch.setattr(cli_runtime.subprocess, "run", fake_run)
 
     result = claude_code_cli.install_latest()
     assert result["ok"] is True
-    assert captured["args"] == ["npm", "install", "-g", "@anthropic-ai/claude-code"]
+    assert captured["args"] == [
+        "npm",
+        "install",
+        "-g",
+        "--prefix",
+        str(tmp_path / "npm"),
+        "@anthropic-ai/claude-code@latest",
+    ]
+
+
+def test_adopt_existing_credentials_migrates_login_from_default_config_dir(
+    monkeypatch, tmp_path
+):
+    # A `claude auth login` run without CLAUDE_CONFIG_DIR set (an older
+    # container, or a non-fork image with this checkout bind-mounted) writes
+    # to ~/.claude -- readable by hand, invisible here, and destroyed by the
+    # next container recreate. It must be adopted, not ignored.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    stray_home = tmp_path / "root"
+    (stray_home / ".claude").mkdir(parents=True)
+    (stray_home / ".claude" / ".credentials.json").write_text('{"token":"fake"}')
+
+    target = tmp_path / "persisted" / ".credentials.json"
+    monkeypatch.setattr(claude_code_cli, "credentials_path", lambda: target)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    claude_code_cli._adopt_existing_credentials()
+
+    assert target.is_file()
+    assert target.read_text() == '{"token":"fake"}'
+
+
+def test_adopt_existing_credentials_never_overwrites_persisted_login(monkeypatch, tmp_path):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    stray_home = tmp_path / "root"
+    (stray_home / ".claude").mkdir(parents=True)
+    (stray_home / ".claude" / ".credentials.json").write_text('{"token":"stale"}')
+
+    target = tmp_path / "persisted" / ".credentials.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"token":"fresh"}')
+    monkeypatch.setattr(claude_code_cli, "credentials_path", lambda: target)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    claude_code_cli._adopt_existing_credentials()
+
+    assert target.read_text() == '{"token":"fresh"}'
 
 
 def test_provider_disconnect_removes_owned_credentials_file(monkeypatch, tmp_path):
@@ -279,6 +333,7 @@ def test_provider_disconnect_removes_owned_credentials_file(monkeypatch, tmp_pat
     # Claude Code credentials file lives under this plugin's own
     # provider_data_dir() -- so disconnect() may safely delete it.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [])
     creds = tmp_path / ".credentials.json"
     creds.write_text('{"token":"fake"}')
     monkeypatch.setattr(claude_code_cli, "credentials_path", lambda: creds)
@@ -287,6 +342,35 @@ def test_provider_disconnect_removes_owned_credentials_file(monkeypatch, tmp_pat
     result = provider.disconnect()
     assert result["disconnected"] is True
     assert not creds.exists()
+
+
+def test_provider_disconnect_also_clears_adoptable_stray_credentials(monkeypatch, tmp_path):
+    # Deleting only the persisted copy would be a no-op in practice: the
+    # next status read would re-adopt the stray one straight back and the
+    # account would still show connected.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    stray_home = tmp_path / "root"
+    (stray_home / ".claude").mkdir(parents=True)
+    stray = stray_home / ".claude" / ".credentials.json"
+    stray.write_text('{"token":"fake"}')
+
+    creds = tmp_path / "persisted" / ".credentials.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text('{"token":"fake"}')
+
+    monkeypatch.setattr(claude_code_cli, "credentials_path", lambda: creds)
+    monkeypatch.setattr(cli_runtime, "default_homes", lambda: [stray_home])
+
+    result = ClaudeCodeOAuthProvider().disconnect()
+    assert result["disconnected"] is True
+    assert not creds.exists()
+    assert not stray.exists()
+
+    # And the account really stays disconnected on the next read.
+    monkeypatch.setattr(claude_code_cli, "is_installed", lambda: True)
+    monkeypatch.setattr(claude_code_cli, "_version", lambda: "2.1.0")
+    assert claude_code_cli.get_status()["authenticated"] is False
 
 
 def test_provider_disconnect_refuses_when_env_api_key_set(monkeypatch):
