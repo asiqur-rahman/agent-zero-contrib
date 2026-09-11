@@ -19,7 +19,7 @@
 - `BRANCH` is required for branch-based Docker builds.
 - Preserve exposed ports for SSH, HTTP, and tunneled services unless docs and workflows are updated together.
 - Keep the two-runtime Python model aligned with the root contract.
-- Keep runtime desktop packages on `kali-last-snapshot`; carry the rolling base's matching ATK introspection package into that transaction, then pin the verified Python 3.13-compatible LibreOffice and complete Xpra runtime versions in `fs/ins/install_additional.sh` for both published architectures.
+- Keep runtime desktop packages on `kali-last-snapshot`; align ATK's version-locked libraries and installed optional components with the pinned snapshot version, and pin the verified LibreOffice and complete Xpra runtime versions in `fs/ins/install_additional.sh` for both published architectures. Let those package dependencies constrain Python compatibility; do not depend on retired rolling package versions remaining downloadable.
 - Do not bake secrets, local `.env` values, or user data into the image.
 - Runtime startup must ensure `/a0/usr/uploads` exists before supervised services start.
 - `CLAUDE_CONFIG_DIR` is set to a persisted path under `usr/` so `plugins/_oauth`'s Claude Code provider survives a container recreation; runtime startup must ensure that directory exists before supervised services start, same as `/a0/usr/uploads`. Do NOT add a `CURSOR_HOME` `ENV` for the same purpose -- confirmed live against the real Cursor CLI, it does not honor that variable at all and always writes to `$HOME/.cursor` regardless.
@@ -27,6 +27,7 @@
 - External CLIs installed by `plugins/_oauth` (`command-code`, `claude`) go to the persisted npm prefix `/a0/usr/plugins/_oauth/_cli/npm`, which is on `PATH` as a container-wide `ENV` and is pre-created by `fs/exe/initialize.sh`. Adding a bin directory to `PATH` is safe container-wide (unlike `HOME`), and it has to be: `npm install -g`'s default `/usr/local` prefix lives in the writable layer and is discarded on every container recreate, which is what made a configured Command Code / Claude Code account come back as "not installed" and disconnected after an image update. Do not revert those installs to the default prefix.
 - Runtime startup raises the soft open-file limit toward `A0_NOFILE_LIMIT` (default `65535`) before supervisord starts, bounded by the container hard limit.
 - Self-update user-data backups skip Time Travel shadow history under `usr/.time_travel/` and transient Desktop agent state.
+- Self-update rollback stashes use immutable Git object IDs for creation checks and restoration; resolve the matching reflog selector only when dropping that stash, preserving unrelated entries. Failed restoration retains the stash.
 - Self-update waits up to 180 seconds for the updated or restored WebUI health check by default; `A0_SELF_UPDATE_HEALTH_TIMEOUT_SECONDS` may override it.
 - Successful or already-current self-updates refresh an installed Codex CLI with npm on a best-effort basis; missing CLIs and registry failures must not block Agent Zero startup.
 
